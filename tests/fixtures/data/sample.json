@@ -1,0 +1,173 @@
+{
+  "name": "Adrian Matei",
+  "headline": "Backend Engineer – Node.js / TypeScript | Production Debugging & Distributed Systems | Brasov, Romania | Willing to relocate to Bucharest",
+  "phone": "+40700000000",
+  "email": "adrian.matei@example.com",
+  "linkedinText": "linkedin.com/in/adrian-matei-42234a1b9",
+  "linkedinUrl": "http://www.linkedin.com/in/adrian-matei-42234a1b9",
+  "githubText": "github.com/AdrianMatei20",
+  "githubUrl": "https://github.com/AdrianMatei20/",
+  "summary": "Backend engineer with 5+ years in hands-on engineering roles, including 4 years of TypeScript and 2+ years building Node.js/NestJS services. Most recently owned features for a global enterprise SaaS platform from code through CI/CD into production, monitoring and debugging them in Splunk. Detected and remediated a live production server compromise as sole engineer for a startup, and debugged card-payment processing (preauthorization, card/EBT) by tracing transaction data across layers. Builds and instruments distributed systems with Kafka, RabbitMQ, Kubernetes and OpenTelemetry, and builds with Claude Code and Cursor.",
+  "skills": [
+    {
+      "category": "Core",
+      "skills": "Node.js, TypeScript, JavaScript, NestJS"
+    },
+    {
+      "category": "Observability & Debugging",
+      "skills": "Splunk, OpenTelemetry (distributed tracing), Prometheus, Grafana, Loki, Tempo, structured logging, health checks"
+    },
+    {
+      "category": "Microservices & Integrations",
+      "skills": "microservices, API gateway, REST, OpenAPI/Swagger, event-driven architecture, Kafka (consumer groups), RabbitMQ (retries, dead-letter queues), third-party API integrations (payment, booking, Jira, Microsoft Graph)"
+    },
+    {
+      "category": "Databases",
+      "skills": "SQL: PostgreSQL, MySQL; NoSQL: MongoDB (aggregation pipelines), Redis, DynamoDB; TypeORM, Mongoose, Prisma"
+    },
+    {
+      "category": "Cloud & Infrastructure",
+      "skills": "Kubernetes (k3s), Helm, Docker, AWS, Terraform, Ansible, Linux server hardening (SSH, firewall)"
+    },
+    {
+      "category": "CI/CD & Testing",
+      "skills": "GitHub Actions, Jenkins, Spinnaker, Git, Jest, Vitest, Supertest (unit + e2e), Playwright"
+    },
+    {
+      "category": "AI coding & agent tools",
+      "skills": "Claude Code (plan-then-implement agent workflow), Cursor; LLM integration via the Claude API"
+    },
+    {
+      "category": "Auth & Security",
+      "skills": "JWT, OAuth 2.0, session auth (Passport), RBAC, OWASP Top 10"
+    },
+    {
+      "category": "Also worked with",
+      "skills": "Python, Go, C#/.NET (ASP.NET Core), Java, Angular, React"
+    }
+  ],
+  "experience": [
+    {
+      "title": "Senior Software Engineer",
+      "company": "Brainspotting | Technology Recruitment",
+      "location": "4-month contract, Remote",
+      "period": "Jan 2026 – Apr 2026",
+      "bullets": [
+        "Contracted to a global enterprise SaaS company, working in a distributed international team on a multi-service NestJS monorepo",
+        "Owned features end to end through CI/CD (Jenkins, Spinnaker) into production, monitoring and debugging production behaviour in Splunk",
+        "Wrote Axios-based adapter layers for upstream services with standardised error handling, normalising third-party failures into consistent application-level errors",
+        "Built and extended REST endpoints against OpenAPI specs (paginated list endpoints, nested subresources and aggregation endpoints), with class-validator DTOs enforcing request contracts",
+        "Implemented DynamoDB-backed repository layers on AWS SDK v3, designing keyed access patterns and transactional writes behind a persistence interface the service layer consumed",
+        "Wrote unit and e2e tests; introduced E2E coverage reporting, identifying gaps between total and end-to-end coverage",
+        "Used Cursor to navigate the multi-service architecture and deployment patterns and speed up testing and documentation"
+      ]
+    },
+    {
+      "title": "Full-Stack Software Engineer",
+      "company": "Ruuts.travel",
+      "location": "Part-time, Remote",
+      "period": "Mar 2025 – Dec 2025",
+      "bullets": [
+        "Sole engineer for an early-stage travel-booking startup, owning the full stack and production infrastructure end to end",
+        "Detected and fully remediated a live server compromise: traced unauthorized cron jobs opening outbound connections to hundreds of external servers, removed malicious processes and persistence mechanisms, hardened SSH and firewall access, and blocked the malicious traffic",
+        "Audited the payment integration after signs of tampering and restored its integrity",
+        "Delivered features in an ASP.NET Core/Angular monorepo, integrating third-party booking and payment APIs"
+      ]
+    },
+    {
+      "title": "Software Engineer",
+      "company": "Ensemble Software",
+      "location": "Remote",
+      "period": "Nov 2022 – Sep 2025",
+      "bullets": [
+        "Debugged Java POS payment processing (card/EBT transactions, multiple entry modes, preauthorization flows), tracing transaction data across application layers",
+        "Proactively resolved critical production issues when identified, minimizing downtime and user disruption",
+        "Led the design and development of a NestJS API from scratch for a collaborative requirements-management web app, modelling a PostgreSQL schema for hierarchical, versioned project data",
+        "Implemented the full JWT authentication flow (registration with email confirmation, login, forgot/reset password); containerised services with Docker",
+        "Extended third-party integrations: reworked the Jira export to mirror the requirement tree as epics, stories and sub-tasks, and built a SharePoint integration on Microsoft Graph (OAuth 2.0)",
+        "Introduced a requirements and progress-tracking system that improved client communication, later adopted as the team standard; led the team's client demos"
+      ]
+    },
+    {
+      "title": "Software Developer",
+      "company": "Talenting Software",
+      "location": "Hybrid",
+      "period": "Oct 2021 – Oct 2022",
+      "bullets": [
+        "Built Azure Blob image upload and PDF conversion for a floor-plan review module with version history"
+      ]
+    },
+    {
+      "title": "Software Developer Intern",
+      "company": "Trimble, Siemens, Talenting Software",
+      "location": "Remote",
+      "period": "Nov 2020 – Oct 2021",
+      "bullets": [
+        "Built full-stack web apps with ASP.NET Core and Angular"
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "DevBoard",
+      "description": "event-driven microservices platform (NestJS, Kafka, RabbitMQ, Kubernetes)",
+      "linkText": "github.com/AdrianMatei20/devboard",
+      "linkUrl": "https://github.com/AdrianMatei20/devboard",
+      "bullets": [
+        "Instrumented all services with OpenTelemetry via a Collector to Tempo, Prometheus and Loki, giving one connected trace from the gateway through downstream services into Kafka",
+        "Designed the async integration layer: services communicate only through Kafka (3-partition topic, consumer groups fanning out to notification, analytics and audit) and RabbitMQ (webhooks with exponential backoff over 3 attempts and a dead-letter queue); event publishing is best-effort, so a broker outage degrades the pipeline without failing the write",
+        "Built the NestJS API gateway as the single entry point: strips client-supplied identity headers, rejects malformed requests before any JWT crypto runs, validates the token and injects identity headers downstream services trust",
+        "Deployed on Kubernetes (k3s) via Helm charts with liveness/readiness probes and ConfigMap/Secret separation, provisioned with Terraform and Ansible; GitHub Actions pipelines test, build, push SHA-pinned images and verify the rollout",
+        "Built MongoDB-backed services (Mongoose profile service, Go analytics service with aggregation pipelines) alongside NestJS"
+      ]
+    },
+    {
+      "name": "QuizForge",
+      "description": "LLM quiz generation (NestJS, PostgreSQL, Redis, Claude API)",
+      "linkText": "github.com/AdrianMatei20/QuizForge",
+      "linkUrl": "https://github.com/AdrianMatei20/QuizForge",
+      "bullets": [
+        "Built a resilient third-party (LLM) integration layer: daily budget guard, Redis cache, retries with jittered backoff, and zod schema validation with one repair call",
+        "Streamed results as JSON Lines over Server-Sent Events: each item is validated and saved as soon as its line completes, and reconnecting clients replay saved items before live events",
+        "Tested with Vitest unit and Supertest e2e suites on real PostgreSQL and Redis; GitHub Actions also runs a Playwright test on the full Docker stack and fails the build on OpenAPI or generated-type drift",
+        "Built with Claude Code in 11 phases, approving a written plan for each and verifying it against lint and tests"
+      ]
+    },
+    {
+      "name": "Taskflow",
+      "description": "project management API (NestJS, PostgreSQL, Redis, AWS)",
+      "linkText": "github.com/AdrianMatei20/NestJsAPI",
+      "linkUrl": "https://github.com/AdrianMatei20/TaskFlow",
+      "bullets": [
+        "Persisted structured logs to PostgreSQL, queryable by level and context, and exposed health checks plus request-rate and resource metrics to Prometheus and Grafana",
+        "Added Redis caching with TTL control and graceful fallback on cache failure; covered REST and GraphQL APIs with Jest unit and e2e tests and automated deployment to AWS EC2 via GitHub Actions"
+      ]
+    }
+  ],
+  "education": [
+    {
+      "institution": "Transilvania University of Brasov",
+      "degree": "MSc in Modern Technologies in Software Systems Engineering",
+      "graduated": "Jun 2023"
+    },
+    {
+      "institution": "Transilvania University of Brasov",
+      "degree": "BSc in Computer Science",
+      "graduated": "Jun 2021"
+    }
+  ],
+  "certificates": [
+    {
+      "certificate": "AWS Certified Solutions Architect – Associate",
+      "date": "In preparation"
+    },
+    {
+      "certificate": "Cambridge English: Advanced (CAE) - C1",
+      "date": "Jun 2017"
+    },
+    {
+      "certificate": "YouniHack 2025 – 24-hour cybersecurity hackathon (OWASP Top 10, CTF-style challenges)",
+      "date": "Sep 2025"
+    }
+  ]
+}

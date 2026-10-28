@@ -1,0 +1,11 @@
+# Legacy command (`python generate.py`) needs only docxtpl, plus LibreOffice installed on the system.
+docxtpl>=0.20.2
+
+# AI pipeline (cvgen.cli). Never imported by generate.py or cvgen/render.py.
+anthropic
+pydantic>=2
+pymupdf
+python-dotenv
+
+# Tests
+pytest
