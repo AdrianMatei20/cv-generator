@@ -8,7 +8,7 @@ from docxtpl import DocxTemplate, RichText
 # ----------------------
 # CONFIG
 # ----------------------
-TEMPLATE_PATH = "templates/cv_template.docx"
+TEMPLATE_PATH = "templates/cv_template_with_summary.docx"
 #TEMPLATE_PATH = "templates/cv_template_with_summary.docx"
 #TEMPLATE_PATH = "templates/cv_template_good_bullet_points.docx"
 DATA_DIR = "data"
@@ -131,7 +131,7 @@ def get_soffice_path():
 
     raise RuntimeError("LibreOffice not found. Install it or update path.")
 
-def convert_to_pdf(docx_path):
+def convert_to_pdf(docx_path, output_dir):
     soffice = get_soffice_path()
 
     subprocess.run([
@@ -139,7 +139,7 @@ def convert_to_pdf(docx_path):
         "--headless",
         "--convert-to", "pdf",
         docx_path,
-        "--outdir", OUTPUT_DIR
+        "--outdir", output_dir
     ])
 
 # ---------------------------
@@ -153,15 +153,26 @@ def process_file(file_path):
     data = escape_ampersands(data)
     anon_data = anonymize(data)
 
+    # Create folder per CV
+    person_name = data.get("name", "Candidate").replace(" ", "")
+    folder_path = os.path.join(OUTPUT_DIR, base)
+    os.makedirs(folder_path, exist_ok=True)
+
+    # File names
+    docx_filename = f"CV_{person_name}.docx"
+    pdf_filename = f"CV_{person_name}.pdf"
+
+    docx_path = os.path.join(folder_path, docx_filename)
+
     # NORMAL CV
-    docx_path = os.path.join(OUTPUT_DIR, f"{base}.docx")
     generate_docx(data, docx_path)
-    convert_to_pdf(docx_path)
+    convert_to_pdf(docx_path, folder_path)
 
     # ANONYMIZED CV
-    anon_docx = os.path.join(OUTPUT_DIR, f"{base}_anon.docx")
-    generate_docx(anon_data, anon_docx)
-    convert_to_pdf(anon_docx)
+    anon_docx_path = os.path.join(folder_path, f"CV_JohnDoe.docx")
+
+    generate_docx(anon_data, anon_docx_path)
+    convert_to_pdf(anon_docx_path, folder_path)
 
     print(f"Done: {base}")
 
