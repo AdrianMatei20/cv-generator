@@ -9,7 +9,8 @@ import pytest
 from cvgen import tailor as tailor_mod
 from cvgen.profile import check_profile
 from cvgen.schema import CV
-from cvgen.tailor import TOOL, TailorError, TailoredCV, assemble, build_request, tailor
+from cvgen.tailor import (MAX_REPAIRS, TOOL, TailorError, TailoredCV, TailorValidationError, assemble, build_request,
+                          tailor)
 
 EXAMPLE = Path(__file__).resolve().parent.parent / "profile.example.json"
 
@@ -36,6 +37,14 @@ def selection(**overrides):
     }
     data.update(overrides)
     return TailoredCV.model_validate(data)
+
+
+def invented():
+    """A selection with an invented number (450), which validate() rejects."""
+    return selection(experience=[
+        {"job_id": "exp-globex", "bullets": [{"text": "Designed a PostgreSQL schema for 450 clients", "source_ids": ["exp-globex-01"]}]},
+        {"job_id": "exp-acme", "bullets": [{"text": "Cut p95 latency from 900ms to 220ms", "source_ids": ["exp-acme-02"]}]},
+    ])
 
 
 def test_tool_schema_is_strict():
@@ -82,34 +91,16 @@ def test_assemble_fills_facts_from_profile(profile):
     assert "source_ids" not in json.dumps(cv)
 
 
-def test_assemble_reports_bad_ids(profile):
+def test_assemble_reports_ids_it_cannot_place(profile):
     checked = check_profile(profile)
     bad = selection(experience=[
-        {"job_id": "exp-acme", "bullets": [{"text": "Borrowed bullet", "source_ids": ["exp-globex-01"]}]},
+        {"job_id": "exp-acme", "bullets": [{"text": "Cut p95 latency from 900ms to 220ms", "source_ids": ["exp-acme-02"]}]},
         {"job_id": "exp-nope", "bullets": [{"text": "x", "source_ids": ["exp-acme-01"]}]},
     ], education_ids=["exp-acme"])
-    _, _, problems = assemble(bad, checked.profile)
-    assert any("'exp-globex-01' doesn't belong here" in p for p in problems)
-    assert any("'exp-nope' is not a profile job" in p for p in problems)
-    assert any("'exp-acme' is not a profile education" in p for p in problems)
-
-
-def test_assemble_reports_mixed_compact_bullets(profile):
-    profile["projects"][0]["compact_bullets"] = [{"id": "proj-statuspage-c1", "text": "Uptime monitor for 50 endpoints"}]
-    checked = check_profile(profile)
-    mixed = selection(projects=[{"project_id": "proj-statuspage", "bullets": [
-        {"text": "a", "source_ids": ["proj-statuspage-01"]}, {"text": "b", "source_ids": ["proj-statuspage-c1"]}]}])
-    _, _, problems = assemble(mixed, checked.profile)
-    assert any("mixes bullets and compact_bullets" in p for p in problems)
-
-
-def test_assemble_reports_limit_and_never_claim_violations(profile):
-    profile["preferences"] = {"never_claim": ["Kotlin"]}
-    checked = check_profile(profile)
-    long = selection(summary={"text": "Kotlin " + "x" * 600, "source_ids": ["summary-backend"]})
-    _, _, problems = assemble(long, checked.profile)
-    assert any(p.startswith("summary:") and "at most" in p for p in problems)
-    assert any("never_claim" in p for p in problems)
+    cv, sources, problems = assemble(bad, checked.profile)
+    assert problems == ["experience job_id #2: 'exp-nope' is not a profile job, so it was left out",
+                        "education_ids #1: 'exp-acme' is not a profile education, so it was left out"]
+    assert [j["company"] for j in cv["experience"]] == ["Acme Payments"] and sources["education"] == []
 
 
 class FakeClient:
@@ -121,7 +112,7 @@ class FakeClient:
         self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream))
 
     def _stream(self, **kwargs):
-        self.requests.append(kwargs)
+        self.requests.append({**kwargs, "messages": list(kwargs["messages"])})
         message = self.messages_out.pop(0)
 
         class Ctx:
@@ -138,28 +129,61 @@ def fake_message(content, stop_reason="tool_use", cache_read=0):
     return SimpleNamespace(content=content, stop_reason=stop_reason, usage=usage, model="claude-opus-5-5", stop_details=None)
 
 
+def tool_call(sel, call_id="toolu_1"):
+    return SimpleNamespace(type="tool_use", name="submit_cv", id=call_id, input=sel.model_dump())
+
+
 def test_tailor_returns_result_and_logs_usage(profile, caplog):
-    call = SimpleNamespace(type="tool_use", name="submit_cv", input=selection().model_dump())
-    client = FakeClient([fake_message([call], cache_read=12000)])
+    client = FakeClient([fake_message([tool_call(selection())], cache_read=12000)])
     with caplog.at_level("INFO", logger="cvgen.tailor"):
         result = tailor(profile, "Some JD", client=client)
-    assert result.company == "Acme" and result.problems == []
+    assert result.company == "Acme" and result.problems == [] and result.repairs == []
     assert result.meta()["usage"]["cache_read_input_tokens"] == 12000
     assert "cache_read=12000" in caplog.text
     assert client.requests[0]["model"] == tailor_mod.DEFAULT_MODEL
 
 
-def test_tailor_retries_once_without_tool_call(profile):
+def test_tailor_nudges_once_without_tool_call(profile):
     text = SimpleNamespace(type="text", text="Here is your CV...")
     client = FakeClient([fake_message([text], "end_turn"), fake_message([text], "end_turn")])
     with pytest.raises(TailorError, match="didn't call submit_cv"):
         tailor(profile, "Some JD", client=client)
     assert len(client.requests) == 2
+    assert client.requests[1]["messages"][-1] == {"role": "user", "content": "Submit the CV by calling submit_cv."}
 
 
 def test_tailor_respects_cv_model_env(profile, monkeypatch):
     monkeypatch.setenv("CV_MODEL", "claude-sonnet-5-5")
-    call = SimpleNamespace(type="tool_use", name="submit_cv", input=selection().model_dump())
-    client = FakeClient([fake_message([call])])
+    client = FakeClient([fake_message([tool_call(selection())])])
     tailor(profile, "JD", client=client)
     assert client.requests[0]["model"] == "claude-sonnet-5-5"
+
+
+def test_tailor_repairs_in_the_same_conversation(profile):
+    client = FakeClient([fake_message([tool_call(invented(), "toolu_a")]), fake_message([tool_call(selection(), "toolu_b")])])
+    result = tailor(profile, "JD", client=client)
+    assert result.problems == []
+    assert result.repairs == [{"attempt": 1, "errors": [
+        "experience[1] (Globex Logistics).bullets[0]: number(s) 450 not found in its source items; use only numbers the profile gives"]}]
+    second = client.requests[1]["messages"]
+    assert [m["role"] for m in second] == ["user", "assistant", "user"]
+    assert second[1]["content"][0].input["experience"][0]["bullets"][0]["text"].endswith("450 clients")  # previous output sent back
+    tool_result = second[2]["content"][0]
+    assert tool_result["type"] == "tool_result" and tool_result["tool_use_id"] == "toolu_a" and tool_result["is_error"]
+    assert "450 not found" in tool_result["content"]
+    assert client.requests[0]["system"] == client.requests[1]["system"]  # cached prefix unchanged
+    assert result.usage["output_tokens"] == 1800 and len(result.usage["calls"]) == 2
+
+
+def test_tailor_gives_up_after_max_repairs_and_saves_draft(profile, tmp_path):
+    client = FakeClient([fake_message([tool_call(invented(), f"toolu_{i}")]) for i in range(MAX_REPAIRS + 1)])
+    with pytest.raises(TailorValidationError) as info:
+        tailor(profile, "JD", client=client, draft_dir=tmp_path)
+    assert len(client.requests) == MAX_REPAIRS + 1
+    message = str(info.value)
+    assert f"after {MAX_REPAIRS} repair attempts" in message and "450 not found" in message
+    assert str(tmp_path / "cv.draft.json") in message
+    draft = json.loads((tmp_path / "cv.draft.json").read_text(encoding="utf-8"))
+    meta = json.loads((tmp_path / "cv.draft.meta.json").read_text(encoding="utf-8"))
+    assert draft["experience"][1]["bullets"][0].endswith("450 clients")
+    assert len(meta["repairs"]) == MAX_REPAIRS + 1 and meta["problems"]

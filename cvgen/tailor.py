@@ -2,13 +2,18 @@
 
     result = tailor(profile_dict, jd_text)
     result.cv      # CV JSON for cvgen.render.render()
-    result.meta()  # company, role, source ids, gaps, problems, usage -> cv.meta.json
+    result.meta()  # company, role, source ids, gaps, repairs, usage -> cv.meta.json
 
 Claude answers through one strict tool, `submit_cv`, whose input schema comes from
 TailoredCV below. Claude only chooses profile items by id and writes the text that
 needs judgment (headline, summary, skill lines, bullets), each with the profile ids
 it came from. Titles, companies, dates, locations, education, certificates and
 contact details are copied from the profile by id, so they can't drift.
+
+Each submission is checked with cvgen.validate.validate(). If it has errors, the
+previous submission and the error list go back to Claude in the same conversation
+and it submits again, up to MAX_REPAIRS times; after that tailor() raises
+TailorValidationError, saving the last attempt for hand-editing if draft_dir is given.
 
 The system prompt and the profile are sent as cached blocks; the JD goes in the
 uncached user message. Token usage, including cache reads, is logged at INFO.
@@ -19,6 +24,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import anthropic
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -26,13 +32,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from cvgen import limits
 from cvgen.profile import check_profile
 from cvgen.profile_schema import Certification, Education, Job, Profile, Project, format_month
-from cvgen.schema import CV
+from cvgen.validate import validate
 
 DEFAULT_MODEL = "claude-opus-5-5"
 DEFAULT_EFFORT = "high"
 TOOL_NAME = "submit_cv"
 MAX_TOKENS = 32000
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+MAX_REPAIRS = 2
 
 log = logging.getLogger(__name__)
 
@@ -196,22 +203,36 @@ def build_request(profile: dict, jd: str, model: str, effort: str) -> dict:
 # ---------------------------
 @dataclass
 class TailorResult:
-    cv: dict  # CV JSON for render(); validated against cvgen.schema.CV unless `problems` says otherwise
+    cv: dict  # CV JSON for render()
     company: str
     role: str
     sources: dict  # same shape as the CV, with profile ids in place of text
     gaps: list[str]
-    problems: list[str]  # unknown/misplaced ids and schema or length violations; empty when clean
-    usage: dict
+    problems: list[str]  # validation errors left in this CV; empty for a successful tailor()
+    repairs: list[dict]  # one entry per rejected submission: {"attempt": n, "errors": [...]}
+    usage: dict  # summed over all calls, plus "calls": per-call usage
     model: str
-    raw: dict = field(repr=False)  # the submit_cv tool input as returned
+    raw: dict = field(repr=False)  # the last submit_cv tool input as returned
 
     def meta(self) -> dict:
         """Everything for cv.meta.json: traceability and diagnostics, never rendered."""
         return {
-            "company": self.company, "role": self.role, "model": self.model,
-            "sources": self.sources, "gaps": self.gaps, "problems": self.problems, "usage": self.usage,
+            "company": self.company, "role": self.role, "model": self.model, "sources": self.sources,
+            "gaps": self.gaps, "problems": self.problems, "repairs": self.repairs, "usage": self.usage,
         }
+
+
+class TailorValidationError(TailorError):
+    """The CV still had errors after MAX_REPAIRS repair attempts."""
+
+    def __init__(self, result: TailorResult, saved_to: list[Path]):
+        self.result = result
+        self.saved_to = saved_to
+        lines = [f"CV still invalid after {MAX_REPAIRS} repair attempts ({len(result.problems)} error(s)):"]
+        lines += [f"  - {p}" for p in result.problems]
+        if saved_to:
+            lines.append("Last attempt saved for hand-editing: " + ", ".join(str(p) for p in saved_to))
+        super().__init__("\n".join(lines))
 
 
 def _usage(message) -> dict:
@@ -225,23 +246,18 @@ def _usage(message) -> dict:
 
 
 def assemble(tailored: TailoredCV, profile: Profile) -> tuple[dict, dict, list[str]]:
-    """Turn Claude's selections into the render CV, its source map, and any problems found."""
+    """Turn Claude's selections into the render CV and its source map.
+
+    Returns problems only for selections that can't appear in the CV at all (an id that
+    isn't a job, project, education or certificate). Everything else is validate()'s job.
+    """
     index = profile.index()
     problems = []
-
-    def check(ids, where, allowed=None):
-        for item_id in ids:
-            if item_id not in index:
-                problems.append(f"{where}: unknown profile id '{item_id}'")
-            elif allowed is not None and item_id not in allowed:
-                problems.append(f"{where}: id '{item_id}' doesn't belong here")
-        if not ids:
-            problems.append(f"{where}: no source_ids")
 
     def lookup(item_id, kind, where):
         item = index.get(item_id)
         if not isinstance(item, kind):
-            problems.append(f"{where}: '{item_id}' is not a profile {kind.__name__.lower()}")
+            problems.append(f"{where}: '{item_id}' is not a profile {kind.__name__.lower()}, so it was left out")
             return None
         return item
 
@@ -252,26 +268,16 @@ def assemble(tailored: TailoredCV, profile: Profile) -> tuple[dict, dict, list[s
     if c.github:
         cv.update(githubText=c.github.text, githubUrl=c.github.url)
     cv["summary"] = tailored.summary.text
-    check(tailored.headline.source_ids, "headline")
-    check(tailored.summary.source_ids, "summary")
     sources = {"headline": tailored.headline.source_ids, "summary": tailored.summary.source_ids}
 
-    cv["skills"] = []
-    sources["skills"] = []
-    for i, line in enumerate(tailored.skills):
-        check(line.source_ids, f"skills[{i}]")
-        cv["skills"].append({"category": line.category, "skills": line.skills})
-        sources["skills"].append(line.source_ids)
+    cv["skills"] = [{"category": line.category, "skills": line.skills} for line in tailored.skills]
+    sources["skills"] = [line.source_ids for line in tailored.skills]
 
     jobs = []
     for i, pick in enumerate(tailored.experience):
-        job = lookup(pick.job_id, Job, f"experience[{i}]")
-        if job is None:
-            continue
-        own = {b.id for b in job.bullets}
-        for j, b in enumerate(pick.bullets):
-            check(b.source_ids, f"experience[{i}].bullets[{j}]", own)
-        jobs.append((job, pick))
+        job = lookup(pick.job_id, Job, f"experience job_id #{i + 1}")
+        if job is not None:
+            jobs.append((job, pick))
     jobs.sort(key=lambda jp: jp[0].start, reverse=True)  # reverse-chronological, whatever order came back
     cv["experience"] = [
         {"title": job.title, "company": job.company, "location": job.location, "period": job.period,
@@ -283,17 +289,9 @@ def assemble(tailored: TailoredCV, profile: Profile) -> tuple[dict, dict, list[s
     cv["projects"] = []
     sources["projects"] = []
     for i, pick in enumerate(tailored.projects):
-        project = lookup(pick.project_id, Project, f"projects[{i}]")
+        project = lookup(pick.project_id, Project, f"project_id #{i + 1}")
         if project is None:
             continue
-        regular = {b.id for b in project.bullets}
-        compact = {b.id for b in project.compact_bullets}
-        used = set()
-        for j, b in enumerate(pick.bullets):
-            check(b.source_ids, f"projects[{i}].bullets[{j}]", regular | compact)
-            used.update(b.source_ids)
-        if used & regular and used & compact:
-            problems.append(f"projects[{i}]: mixes bullets and compact_bullets of '{project.id}'")
         entry = {"name": project.name, "description": project.description}
         if project.link:
             entry.update(linkText=project.link.text, linkUrl=project.link.url)
@@ -302,39 +300,54 @@ def assemble(tailored: TailoredCV, profile: Profile) -> tuple[dict, dict, list[s
         sources["projects"].append({"id": project.id, "bullets": [b.source_ids for b in pick.bullets]})
 
     cv["education"] = []
+    sources["education"] = []
     for i, item_id in enumerate(tailored.education_ids):
-        edu = lookup(item_id, Education, f"education[{i}]")
+        edu = lookup(item_id, Education, f"education_ids #{i + 1}")
         if edu:
             cv["education"].append({"institution": edu.institution, "degree": edu.degree, "graduated": format_month(edu.graduated)})
-    sources["education"] = [i for i in tailored.education_ids if isinstance(index.get(i), Education)]
+            sources["education"].append(item_id)
 
     cv["certificates"] = []
+    sources["certificates"] = []
     for i, item_id in enumerate(tailored.certification_ids):
-        cert = lookup(item_id, Certification, f"certificates[{i}]")
+        cert = lookup(item_id, Certification, f"certification_ids #{i + 1}")
         if cert:
             entry = {"certificate": cert.name, "date": format_month(cert.date) if cert.date else (cert.status or "")}
             if cert.details:
                 entry["details"] = cert.details
             cv["certificates"].append(entry)
-    sources["certificates"] = [i for i in tailored.certification_ids if isinstance(index.get(i), Certification)]
-
-    never = [n.lower() for n in profile.preferences.never_claim]
-    text = json.dumps(cv, ensure_ascii=False).lower()
-    problems += [f"CV contains '{n}', which preferences.never_claim forbids" for n in never if n and n in text]
-
-    try:
-        cv = CV.model_validate(cv).to_render_dict()
-    except ValidationError as exc:
-        for err in exc.errors():
-            problems.append(f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}")
+            sources["certificates"].append(item_id)
     return cv, sources, problems
+
+
+def _repair_message(tool_use_id: str, errors: list[str]) -> dict:
+    listing = "\n".join(f"- {e}" for e in errors)
+    return {"role": "user", "content": [{
+        "type": "tool_result",
+        "tool_use_id": tool_use_id,
+        "is_error": True,
+        "content": (
+            f"The CV you submitted has {len(errors)} problem(s):\n{listing}\n\n"
+            "Paths refer to the rendered CV: experience is ordered newest first, and titles, companies, dates, "
+            "education and certificates are filled in from the profile by id. Fix every problem without breaking "
+            f"the other rules, then call {TOOL_NAME} again with the complete corrected CV."
+        ),
+    }]}
+
+
+def _save_draft(draft_dir: Path, cv: dict, meta: dict) -> list[Path]:
+    draft_dir.mkdir(parents=True, exist_ok=True)
+    paths = [draft_dir / "cv.draft.json", draft_dir / "cv.draft.meta.json"]
+    for path, data in zip(paths, (cv, meta)):
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return paths
 
 
 # ---------------------------
 # API CALL
 # ---------------------------
-def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None,
-           model: str | None = None, effort: str | None = None) -> TailorResult:
+def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None, model: str | None = None,
+           effort: str | None = None, draft_dir: Path | None = None) -> TailorResult:
     checked = check_profile(profile)
     if checked.errors:
         raise TailorError("profile has errors:\n" + "\n".join(checked.errors))
@@ -342,14 +355,18 @@ def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None,
     model = model or os.environ.get("CV_MODEL") or DEFAULT_MODEL
     effort = effort or os.environ.get("CV_EFFORT") or DEFAULT_EFFORT
     request = build_request(profile, jd, model, effort)
+    messages = list(request["messages"])
+    calls, repairs = [], []
+    nudged = False  # tool_choice is "auto": allow one reminder if Claude answers without the tool
 
-    for attempt in (1, 2):  # tool_choice is "auto", so retry once if Claude answers without the tool
-        with client.beta.messages.stream(**request) as stream:
+    while True:
+        with client.beta.messages.stream(**{**request, "messages": messages}) as stream:
             message = stream.get_final_message()
         usage = _usage(message)
+        calls.append(usage)
         log.info(
-            "tailor %s (attempt %d): input=%d output=%d cache_write=%d cache_read=%d stop=%s",
-            message.model, attempt, usage["input_tokens"], usage["output_tokens"],
+            "tailor %s (call %d): input=%d output=%d cache_write=%d cache_read=%d stop=%s",
+            message.model, len(calls), usage["input_tokens"], usage["output_tokens"],
             usage["cache_creation_input_tokens"], usage["cache_read_input_tokens"], message.stop_reason,
         )
         if message.stop_reason == "refusal":
@@ -357,17 +374,39 @@ def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None,
             raise TailorError(f"request refused ({getattr(details, 'category', None)}): {getattr(details, 'explanation', '')}")
         if message.stop_reason == "max_tokens":
             raise TailorError(f"hit max_tokens={MAX_TOKENS} before finishing")
-        call = next((b for b in message.content if b.type == "tool_use" and b.name == TOOL_NAME), None)
-        if call is not None:
-            break
-    else:
-        text = " ".join(b.text for b in message.content if b.type == "text")
-        raise TailorError(f"Claude didn't call {TOOL_NAME}: {text[:500]}")
+        # Pass the assistant turn back unchanged (thinking blocks included) on any follow-up.
+        messages.append({"role": "assistant", "content": message.content})
 
-    raw = copy.deepcopy(call.input)
-    tailored = TailoredCV.model_validate(raw)
-    cv, sources, problems = assemble(tailored, checked.profile)
-    for problem in problems:
-        log.warning("tailor: %s", problem)
-    return TailorResult(cv=cv, company=tailored.company, role=tailored.role, sources=sources, gaps=tailored.gaps,
-                        problems=problems, usage=usage, model=message.model, raw=raw)
+        call = next((b for b in message.content if b.type == "tool_use" and b.name == TOOL_NAME), None)
+        if call is None:
+            if nudged:
+                text = " ".join(b.text for b in message.content if b.type == "text")
+                raise TailorError(f"Claude didn't call {TOOL_NAME}: {text[:500]}")
+            nudged = True
+            messages.append({"role": "user", "content": f"Submit the CV by calling {TOOL_NAME}."})
+            continue
+
+        raw = copy.deepcopy(call.input)
+        try:
+            tailored = TailoredCV.model_validate(raw)
+        except ValidationError as exc:
+            errors = [f"submit_cv input {'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()]
+            cv, sources, company, role, gaps = {}, {}, "", "", []
+        else:
+            cv, sources, errors = assemble(tailored, checked.profile)
+            company, role, gaps = tailored.company, tailored.role, tailored.gaps
+            errors += validate(cv, {"sources": sources}, profile)
+
+        total = {k: sum(c[k] for c in calls) for k in calls[0]}
+        result = TailorResult(cv=cv, company=company, role=role, sources=sources, gaps=gaps, problems=errors,
+                              repairs=repairs, usage={**total, "calls": calls}, model=message.model, raw=raw)
+        if not errors:
+            return result
+        for error in errors:
+            log.warning("tailor: attempt %d: %s", len(repairs) + 1, error)
+        repairs.append({"attempt": len(repairs) + 1, "errors": errors})
+        if len(repairs) > MAX_REPAIRS:
+            saved = _save_draft(Path(draft_dir), cv, result.meta()) if draft_dir else []
+            raise TailorValidationError(result, saved)
+        log.info("tailor: asking Claude to fix %d error(s) (repair %d of %d)", len(errors), len(repairs), MAX_REPAIRS)
+        messages.append(_repair_message(call.id, errors))
