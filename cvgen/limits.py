@@ -1,10 +1,13 @@
 """Length limits for a tailored CV. Tune here; cvgen.schema enforces them.
+Use override(MAX_PAGES=1) to change a limit for one run (the CLI's --pages).
 
 Measured on templates/cv_template_with_summary.docx (Letter, 0.5in margins,
 7.5in usable width, Calibri 11pt, bullets indented 0.15in) by reading the
 lines LibreOffice actually rendered: full bullet lines held 102-122
 characters, median 113. Summary and skills lines (no indent) hold ~112-120.
 """
+
+from contextlib import contextmanager
 
 # Characters that fit on one full bullet line. Use the conservative end so
 # estimates of line count err towards "more lines".
@@ -32,3 +35,18 @@ MAX_SKILL_LINE_CHARS = 2 * CHARS_PER_LINE  # category name + items, two lines
 # Layout pass (pipeline step 6).
 WIDOW_MAX_WORDS = 4  # a wrapped bullet whose last line has this many words or fewer is a "widow"
 MAX_LAYOUT_ROUNDS = 2  # rewrite/re-render rounds after the first render
+
+
+@contextmanager
+def override(**values):
+    """Temporarily change limits, e.g. `with override(MAX_PAGES=1): ...`; restored afterwards."""
+    module = globals()
+    unknown = [k for k in values if k not in module or not k.isupper()]
+    if unknown:
+        raise KeyError(f"unknown limit(s): {', '.join(unknown)}")
+    old = {k: module[k] for k in values}
+    module.update(values)
+    try:
+        yield
+    finally:
+        module.update(old)

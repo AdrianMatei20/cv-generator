@@ -201,7 +201,8 @@ TOOL = {
     "input_schema": strict_schema(RewritePlan),
 }
 
-SYSTEM_PROMPT = f"""\
+def system_prompt() -> str:
+    return f"""\
 You fix layout problems in a rendered CV. Call the {TOOL_NAME} tool exactly once; don't answer in plain text.
 
 Widows are bullets (or the summary) whose last line holds only a few words. For each widow, either shorten it so it fits on one line fewer, or extend it with true detail from its source bullets so the last line is fuller. Keep the meaning and the JD keywords it contains. A widow's entry tells you how many characters fit on a line; aim to end the last line at least half full, or remove the wrapped line entirely.
@@ -280,7 +281,7 @@ def build_request(cv: dict, sources: dict, report: LayoutReport, profile: Profil
         "output_config": {"effort": LAYOUT_EFFORT},
         "tools": [TOOL],
         "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
-        "system": SYSTEM_PROMPT,
+        "system": system_prompt(),
         "messages": [{"role": "user", "content": "\n".join(parts)}],
     }
 
@@ -349,24 +350,33 @@ def _render_checked(cv: dict, folder: Path, basename: str) -> Path:
 
 
 def fix_layout(cv: dict, sources: dict, profile: dict, jd: str, folder: Path, basename: str, *,
-               client=None, model: str | None = None) -> tuple[dict, dict, dict]:
+               client=None, model: str | None = None, max_rounds: int | None = None,
+               progress=None) -> tuple[dict, dict, dict]:
     """Render, check, and fix widows/page overflow. Returns the best cv, its sources, and meta["layout"].
 
-    The best version is the one left rendered in `folder` when this returns.
+    The best version is the one left rendered in `folder` when this returns. `max_rounds=0`
+    only renders and checks (no Claude call); the default is limits.MAX_LAYOUT_ROUNDS.
     """
+    progress = progress or (lambda message: None)
+    max_rounds = limits.MAX_LAYOUT_ROUNDS if max_rounds is None else max_rounds
     profile_model = Profile.model_validate(profile)
     model = model or os.environ.get("CV_MODEL") or DEFAULT_MODEL
+    progress("Rendering (LibreOffice)")
     pdf = _render_checked(cv, folder, basename)
     report = check_layout(pdf, cv)
+    progress(f"Layout check: {report.pages} page(s), {len(report.widows)} widow(s)"
+             + (f", over the {limits.MAX_PAGES}-page limit" if report.over_pages else ""))
     rounds = [{"round": 0, **report.summary()}]
     best = (report, cv, sources, 0)
     rendered = 0
     usage_calls = []
 
-    for n in range(1, limits.MAX_LAYOUT_ROUNDS + 1):
+    for n in range(1, max_rounds + 1):
         base_report, base_cv, base_sources, base_round = best
         if base_report.ok:
             break
+        progress(f"Layout round {n}/{max_rounds}: fixing {len(base_report.widows)} widow(s)"
+                 + (" and the page overflow" if base_report.over_pages else ""))
         client = client or anthropic.Anthropic()
         try:
             plan, usage = ask_claude(client, build_request(base_cv, base_sources, base_report, profile_model, jd, model))
@@ -385,17 +395,21 @@ def fix_layout(cv: dict, sources: dict, profile: dict, jd: str, folder: Path, ba
             rounds.append({**record, "result": "rejected", "validation_errors": errors})
             log.warning("layout round %d rejected: %s", n, "; ".join(errors))
             continue
+        progress(f"Layout round {n}/{max_rounds}: re-rendering")
         pdf = _render_checked(new_cv, folder, basename)
         rendered = n
         report = check_layout(pdf, new_cv)
         better = report.score() < base_report.score()
         rounds.append({**record, "result": "kept" if better else "worse, discarded", **report.summary()})
         log.info("layout round %d: %d page(s), %d widow(s)%s", n, report.pages, len(report.widows), "" if better else " (worse, discarded)")
+        progress(f"Layout round {n}/{max_rounds}: {report.pages} page(s), {len(report.widows)} widow(s)"
+                 + ("" if better else ", worse than before, discarded"))
         if better:
             best = (report, new_cv, new_sources, n)
 
     best_report, best_cv, best_sources, best_round = best
     if rendered != best_round:  # the files on disk are from a discarded round
+        progress(f"Re-rendering the kept version (round {best_round})")
         _render_checked(best_cv, folder, basename)
     total = {k: sum(u[k] for u in usage_calls) for k in usage_calls[0]} if usage_calls else {}
     meta = {"kept_round": best_round, "final_pages": best_report.pages, "final_widows": len(best_report.widows),

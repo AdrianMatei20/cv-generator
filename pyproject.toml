@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cvgen"
+version = "0.2.0"
+description = "Tailor a CV to a job description with Claude, rendered from a docx template."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "docxtpl>=0.20.2",
+    "anthropic>=2.3",
+    "pydantic>=2",
+    "pymupdf",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+cvgen = "cvgen.cli:main"
+
+[tool.setuptools]
+packages = ["cvgen"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

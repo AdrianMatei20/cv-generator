@@ -125,7 +125,9 @@ TOOL = {
 # ---------------------------
 # PROMPT
 # ---------------------------
-SYSTEM_PROMPT = f"""\
+def system_prompt() -> str:
+    """Built per request from cvgen.limits, so a runtime override (e.g. --pages) applies."""
+    return f"""\
 You tailor a candidate's CV to a job description (JD). The candidate's master profile is in <profile> below; it is the only source of facts about them. The JD arrives in the user message. Submit the result by calling the {TOOL_NAME} tool exactly once; don't answer in plain text.
 
 How the profile works
@@ -188,7 +190,7 @@ def build_request(profile: dict, jd: str, model: str, effort: str) -> dict:
         # and tailor() checks it happened.
         "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
         "system": [
-            {"type": "text", "text": SYSTEM_PROMPT},
+            {"type": "text", "text": system_prompt()},
             {"type": "text", "text": profile_block(profile), "cache_control": {"type": "ephemeral"}},
         ],
         "messages": [{
@@ -347,7 +349,9 @@ def _save_draft(draft_dir: Path, cv: dict, meta: dict) -> list[Path]:
 # API CALL
 # ---------------------------
 def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None, model: str | None = None,
-           effort: str | None = None, draft_dir: Path | None = None) -> TailorResult:
+           effort: str | None = None, draft_dir: Path | None = None, progress=None) -> TailorResult:
+    """`progress`, if given, is called with a short message at each stage (for the CLI)."""
+    progress = progress or (lambda message: None)
     checked = check_profile(profile)
     if checked.errors:
         raise TailorError("profile has errors:\n" + "\n".join(checked.errors))
@@ -358,6 +362,7 @@ def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None,
     messages = list(request["messages"])
     calls, repairs = [], []
     nudged = False  # tool_choice is "auto": allow one reminder if Claude answers without the tool
+    progress(f"Tailoring with {model} (effort {effort})")
 
     while True:
         with client.beta.messages.stream(**{**request, "messages": messages}) as stream:
@@ -387,6 +392,7 @@ def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None,
             continue
 
         raw = copy.deepcopy(call.input)
+        progress("Validating")
         try:
             tailored = TailoredCV.model_validate(raw)
         except ValidationError as exc:
@@ -409,4 +415,5 @@ def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None,
             saved = _save_draft(Path(draft_dir), cv, result.meta()) if draft_dir else []
             raise TailorValidationError(result, saved)
         log.info("tailor: asking Claude to fix %d error(s) (repair %d of %d)", len(errors), len(repairs), MAX_REPAIRS)
+        progress(f"Repairing {len(errors)} validation error(s) (attempt {len(repairs)}/{MAX_REPAIRS})")
         messages.append(_repair_message(call.id, errors))
