@@ -13,7 +13,7 @@ import re
 from pydantic import ValidationError
 
 from cvgen import limits
-from cvgen.profile_schema import Bullet, Certification, Education, Job, Profile, Project, format_month
+from cvgen.profile_schema import Availability, Bullet, Certification, Education, Job, Profile, Project, format_month
 from cvgen.schema import CV, split_list
 
 # Pydantic error types already reported, with clearer wording, by the length checks below.
@@ -75,6 +75,7 @@ def _length_errors(cv) -> list[str]:
             errors.append(f"{where} is {len(value)} characters; max {limit}. Shorten it.")
 
     text_limit("headline", cv.get("headline"), limits.MAX_HEADLINE_CHARS)
+    text_limit("availability", cv.get("availability"), limits.MAX_AVAILABILITY_CHARS)
     text_limit("summary", cv.get("summary"), limits.MAX_SUMMARY_CHARS)
     for section, max_bullets in (("experience", limits.MAX_BULLETS_PER_ROLE), ("projects", limits.MAX_BULLETS_PER_PROJECT)):
         for i, item in _items(cv, section):
@@ -172,6 +173,19 @@ def _traceability_errors(cv, sources, profile: Profile) -> list[str]:
     # headline and summary
     for key in ("headline", "summary"):
         check_numbers(cv.get(key), ids_exist(sources.get(key), key), key)
+
+    # availability: profile preferences.availability lines, verbatim, joined with " | "; never in the headline
+    picked = [index.get(i) for i in sources.get("availability") or []]
+    if not all(isinstance(a, Availability) for a in picked):
+        errors.append(f"availability: source ids {sources.get('availability')} must all be preferences.availability ids")
+    else:
+        expected = " | ".join(a.text for a in picked) or None
+        if cv.get("availability") != expected:
+            errors.append(f"availability is '{cv.get('availability')}' but the profile lines say '{expected}'")
+    headline = (cv.get("headline") or "").lower() if isinstance(cv.get("headline"), str) else ""
+    for a in profile.preferences.availability:
+        if a.text.lower() in headline:
+            errors.append(f"headline repeats '{a.text}'; remove it from the headline and pick its id ({a.id}) in availability_ids instead")
 
     # skills: every listed skill must be a profile skill
     skill_by_name = {}

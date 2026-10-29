@@ -130,11 +130,17 @@ class Award(Item):
     details: Optional[Text] = None
 
 
+class Availability(Item):
+    text: Text  # shown verbatim on its own line under the headline, e.g. "Willing to relocate to Bucharest"
+
+
 class Preferences(_Model):
-    """Filled in by hand; guides tailoring. Never a source of facts."""
+    """Filled in by hand; guides tailoring. Never a source of facts, except `availability`: what the
+    candidate states about where and how they'll work, picked by id and copied verbatim into the CV."""
     target_roles: list[Text] = []
     never_claim: list[Text] = []  # things the CV must never say, even if a source file did
     tone: str = ""
+    availability: list[Availability] = []
 
 
 class Profile(_Model):
@@ -168,6 +174,8 @@ class Profile(_Model):
         for i, group in enumerate(self.skills):
             for j, skill in enumerate(group.skills):
                 yield f"skills[{i}].skills[{j}]", skill
+        for i, item in enumerate(self.preferences.availability):
+            yield f"preferences.availability[{i}]", item
 
     def index(self) -> dict[str, Item]:
         """Map id -> item. Assumes ids are present and unique (see load_profile)."""

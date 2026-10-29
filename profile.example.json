@@ -7,6 +7,11 @@
     "linkedin": { "text": "linkedin.com/in/janedoe", "url": "https://www.linkedin.com/in/janedoe" },
     "github": { "text": "github.com/janedoe", "url": "https://github.com/janedoe" }
   },
+  "preferences": {
+    "availability": [
+      {"id": "avail-relocate-berlin", "text": "Willing to relocate to Berlin"}
+    ]
+  },
   "headlines": [
     { "id": "headline-backend", "text": "Backend Engineer – Node.js / TypeScript | Cluj-Napoca, Romania", "tags": ["backend"] },
     { "id": "headline-sre", "text": "Production & Platform Engineer – Kubernetes / Observability", "tags": ["sre", "devops"] }

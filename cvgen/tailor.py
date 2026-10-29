@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from cvgen import costs, limits, settings
 from cvgen.profile import check_profile
-from cvgen.profile_schema import Certification, Education, Job, Profile, Project, format_month
+from cvgen.profile_schema import Availability, Certification, Education, Job, Profile, Project, format_month
 from cvgen.schema import split_list
 from cvgen.validate import validate
 
@@ -86,6 +86,9 @@ class TailoredCV(_Model):
     company: str = Field(description="Hiring company's short name from the JD, e.g. 'Google'. 'Unknown' if the JD doesn't say.")
     role: str = Field(description="Role title from the JD, e.g. 'Software Engineer'.")
     headline: SourcedText
+    availability_ids: list[str] = Field(
+        default_factory=list,  # strict_schema() still makes it required for Claude
+        description="Ids of preferences.availability lines to show under the headline (e.g. relocation), in order; empty if none fit the JD.")
     summary: SourcedText
     skills: list[SkillLine]
     experience: list[JobPick] = Field(description="Every profile job, each with at least one bullet.")
@@ -140,7 +143,7 @@ How the profile works
 - A project may have `compact_bullets`, a shorter alternative to its `bullets` where one bullet can summarise several.
 - `headlines` and `summaries` are variants labelled with a `target_role`.
 - Jobs with `positions` (e.g. internships) are shown as one entry; a bullet's `position` says which position it belongs to.
-- `preferences` is written by the candidate. Let `target_roles` and `tone` guide your choices, and never write anything listed in `never_claim`. Preferences are not facts.
+- `preferences` is written by the candidate. Let `target_roles` and `tone` guide your choices, and never write anything listed in `never_claim`. Preferences are not facts, except `preferences.availability`: what the candidate states about where and how they'll work (relocation, remote), shown verbatim on its own line under the headline when picked by id.
 
 Never invent
 - Never claim or imply any skill, tool, technology, employer, job title, date, duration, number, metric or certificate that the profile doesn't support. Don't round, inflate or combine numbers into new ones.
@@ -157,7 +160,7 @@ Choosing content
 - Pick the experience, projects and skills most relevant to this JD; shorten or drop the rest. Keep every job so the work history has no gaps, but give older or unrelated jobs just one or two bullets.
 - Order bullets within each job and project by relevance to the JD, most relevant first. Choose the projects that best support the JD.
 - For a project with `compact_bullets`, use either its `bullets` or its `compact_bullets`, never both.
-- Start the headline and summary from the closest `target_role` variant and adapt them to the JD.
+- Start the headline and summary from the closest `target_role` variant and adapt them to the JD. Leave relocation and remote/hybrid availability out of the headline: pick the matching `preferences.availability` ids in `availability_ids` instead (none if the JD's location makes them irrelevant).
 - Use the JD's own words for skills, technologies and activities wherever they are true for the candidate. For example, if the JD says "root cause analysis" and a bullet describes tracing a production issue to its cause, you may call it root cause analysis. Never use a JD term to claim something the profile doesn't support.
 
 Sources
@@ -310,13 +313,19 @@ def assemble(tailored: TailoredCV, profile: Profile) -> tuple[dict, dict, list[s
         return item
 
     c = profile.contact
-    cv = {"name": c.name, "headline": tailored.headline.text, "phone": c.phone, "email": c.email}
+    cv = {"name": c.name, "headline": tailored.headline.text}
+    available = [a for i, item_id in enumerate(tailored.availability_ids)
+                 if (a := lookup(item_id, Availability, f"availability_ids #{i + 1}"))]
+    if available:
+        cv["availability"] = " | ".join(a.text for a in available)
+    cv.update(phone=c.phone, email=c.email)
     if c.linkedin:
         cv.update(linkedinText=c.linkedin.text, linkedinUrl=c.linkedin.url)
     if c.github:
         cv.update(githubText=c.github.text, githubUrl=c.github.url)
     cv["summary"] = tailored.summary.text
-    sources = {"headline": tailored.headline.source_ids, "summary": tailored.summary.source_ids}
+    sources = {"headline": tailored.headline.source_ids, "availability": [a.id for a in available],
+               "summary": tailored.summary.source_ids}
 
     cv["skills"] = [{"category": line.category, "skills": line.skills} for line in tailored.skills]
     sources["skills"] = [line.source_ids for line in tailored.skills]

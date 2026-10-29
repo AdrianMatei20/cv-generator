@@ -225,3 +225,22 @@ def test_tailor_sends_a_long_headline_back_for_repair(profile):
     assert len(client.requests) == 2 and result.problems == []
     assert "headline is 142 characters" in result.repairs[0]["errors"][0]
 
+
+def test_availability_is_copied_verbatim_from_preferences(profile):
+    profile.setdefault("preferences", {})["availability"] = [{"id": "avail-relocate", "text": "Willing to relocate to Berlin"},
+                                              {"id": "avail-remote", "text": "Open to remote"}]
+    sel = selection(availability_ids=["avail-relocate", "avail-remote"])
+    cv, sources, problems = assemble(sel, check_profile(profile).profile)
+    assert problems == [] and cv["availability"] == "Willing to relocate to Berlin | Open to remote"
+    assert list(cv)[:3] == ["name", "headline", "availability"] and sources["availability"] == ["avail-relocate", "avail-remote"]
+    assert tailor_mod.validate(cv, {"sources": sources}, profile) == []
+
+    cv["availability"] = "Willing to relocate anywhere"
+    assert any("availability is" in e for e in tailor_mod.validate(cv, {"sources": sources}, profile))
+    cv["availability"], cv["headline"] = "Willing to relocate to Berlin | Open to remote", "Backend Engineer | Open to remote"
+    assert any("headline repeats 'Open to remote'" in e for e in tailor_mod.validate(cv, {"sources": sources}, profile))
+
+
+def test_cv_without_availability_has_no_availability_key(profile):
+    cv, sources, _ = assemble(selection(), check_profile(profile).profile)
+    assert "availability" not in cv and sources["availability"] == []

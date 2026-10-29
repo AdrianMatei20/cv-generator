@@ -25,6 +25,7 @@ MAX_PROJECTS = 3
 
 # Header and summary.
 MAX_HEADLINE_CHARS = CHARS_PER_LINE  # one centred line
+MAX_AVAILABILITY_CHARS = CHARS_PER_LINE  # its own centred line under the headline, outside the headline limit
 MAX_SUMMARY_CHARS = 5 * CHARS_PER_LINE  # 550, about five lines
 
 # Skills: each category is one "Category: a, b, c" line in the template.

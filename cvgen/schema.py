@@ -112,6 +112,7 @@ class Certificate(_Model):
 class CV(_Model):
     name: Text
     headline: _text(limits.MAX_HEADLINE_CHARS)
+    availability: Optional[_text(limits.MAX_AVAILABILITY_CHARS)] = None  # e.g. "Willing to relocate to Bucharest"
     phone: Text
     email: Text
     linkedinText: Optional[Text] = None
