@@ -1,0 +1,29 @@
+Full Stack Web Development Engineer 
+Magna International • Timisoara Metropolitan Area (Hybrid)
+
+About the job
+Job descriptions may display in multiple languages based on your language selection.What We Offer:At Magna, you can expect an engaging and dynamic environment where you can help to develop industry-leading automotive technologies. We invest in our employees, providing them with the support and resources they need to succeed. As a member of our global team, you can expect exciting, varied responsibilities as well as a wide range of development prospects. Because we believe that your career path should be as unique as you are.Group Summary:Transforming mobility. Making automotive technology that is smarter, cleaner, safer and lighter. That’s what we’re passionate about at Magna Electronics, and we do it by creating world-class Electronic systems. We are a premier supplier for the global automotive industry with full capabilities in design, development, testing and manufacturing of complex Electronic systems. Our name stands for quality, environmental consciousness, and safety. Innovation is what drives us and we drive innovation. Dream big and create the future of mobility at Magna Electronics.Job Responsibilities:What you can expect
+You will be part of our talented and versatile team aiming to create new features for our products
+You will be responsible for managing the entire software development lifecycle, from design to deployment
+You will work on front-end user interfaces, back-end server logic, database management and API integrations
+You will implement algorithms (vision/signal processing) to support the research work, optimize existing implementations for products core development
+You will tweak CSS grids, optimize database queries and ensure our applications are scalable, secure and user-friendly
+What You'll Bring
+Front-End Development: Build responsive, high-performance and visually appealing web applications with proven proficiency in HTML5, CSS3 JavaScript/TypeScript frameworks (e.g., React, Vue.js, or Angular)
+Back-End Development: Design, develop, and maintain robust, scalable server-side logic and RESTful/GraphQL APIs. Good knowledge of server-side languages such as Node.js, Python (Django/FastAPI), Ruby on Rails, or Go
+Database Management: Solid understanding of SQL and NoSQL database design, indexing, and query optimization
+System Architecture: Collaborate with product managers and designers to translate complex requirements into clean, maintainable technical solutions
+DevOps & Deployment: Experience with cloud platforms (AWS, Google Cloud, or Azure) and containerization (Docker). Maintain CI/CD pipelines and assist in cloud deployment and infrastructure management
+Quality Assurance: Write clean, well-documented, and testable code (unit/integration testing) while participating in peer code reviews
+Performance Optimization: Identify bottlenecks, optimize application speed, and ensure high availability and security
+Version Control: Advanced knowledge of Git and collaborative workflows (GitHub/GitLab)
+What We Offer
+We offer an annual gross salary starting from 140,000 RON, complemented by our benefits package
+Flexible working hours and hybrid work
+Health and wellbeing programs
+Meal allowance of 35 RON per day, offered through meal tickets
+Team events and company initiatives
+Extensive training and exciting internal development opportunities
+Awareness, Unity, Empowerment:At Magna, we believe that a diverse workforce is critical to our success. That’s why we are proud to be an equal opportunity employer. We hire on the basis of experience and qualifications, and in consideration of job requirements, regardless of, in particular, color, ancestry, religion, gender, origin, sexual orientation, age, citizenship, marital status, disability or gender identity. Magna takes the privacy of your personal information seriously. We discourage you from sending applications via email or traditional mail to comply with GDPR requirements and your local Data Privacy Law.AI-Assisted Screening DisclosureAs part of our commitment to a fair, consistent, and efficient recruitment process, we may use artificial intelligence (AI) tools to assist in the initial screening of applications submitted through our Workday system. These tools help identify qualifications and experience that align with the role requirements. Please note that AI is used solely to support our recruiters. Final decisions are always made by the hiring manager and the hiring team. Importantly, no applicant data is shared externally through these AI tools. All information remains securely within our systems and is handled in accordance with our privacy and data protection policies.Under conditions defined by applicable law, you may have the right to request an explanation of how AI is used to support decision-making.If you have any questions or concerns about this process, feel free to contact our Talent Attraction team.Worker Type:Regular / PermanentGroup:Magna Electronics
+
+https://www.linkedin.com/jobs/view/4435575325/

@@ -29,15 +29,16 @@ from pathlib import Path
 import anthropic
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from cvgen import limits
+from cvgen import costs, limits, settings
 from cvgen.profile import check_profile
 from cvgen.profile_schema import Certification, Education, Job, Profile, Project, format_month
+from cvgen.schema import split_list
 from cvgen.validate import validate
 
-DEFAULT_MODEL = "claude-opus-5-5"
-DEFAULT_EFFORT = "high"
+DEFAULT_MODEL = settings.DEFAULTS["TAILOR_MODEL"]  # override with TAILOR_MODEL (or CV_MODEL)
+DEFAULT_EFFORT = settings.DEFAULTS["TAILOR_EFFORT"]  # override with TAILOR_EFFORT (or CV_EFFORT)
 TOOL_NAME = "submit_cv"
-MAX_TOKENS = 32000
+MAX_TOKENS = 16000  # ceiling incl. thinking; the largest call seen used ~10.6k at effort high
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 TOOL_CHANGES_BETA = "mid-conversation-tool-changes-2026-07-01"
 # Same betas on every profile call (tailor, gap report), so they share one cache prefix.
@@ -178,21 +179,28 @@ Length: the rendered CV must fit on {limits.MAX_PAGES} pages
 """
 
 
-def _strip_sources(node):
+# Fields Claude never needs: traceability (`sources`), and what Python copies in itself
+# (contact details, project links).
+UNUSED_FIELDS = {"sources", "link"}
+
+
+def _strip_unused(node):
     if isinstance(node, dict):
-        return {k: _strip_sources(v) for k, v in node.items() if k != "sources"}
+        return {k: _strip_unused(v) for k, v in node.items() if k not in UNUSED_FIELDS}
     if isinstance(node, list):
-        return [_strip_sources(v) for v in node]
+        return [_strip_unused(v) for v in node]
     return node
 
 
 def profile_block(profile: dict) -> str:
-    """The profile as Claude sees it: no `sources` (traceability only), stable serialisation."""
-    return "<profile>\n" + json.dumps(_strip_sources(profile), ensure_ascii=False, indent=1) + "\n</profile>"
+    """The profile as Claude sees it: minified, keys sorted (byte-stable, so the cached prefix hits),
+    without contact details, links or sources."""
+    data = _strip_unused({k: v for k, v in profile.items() if k != "contact"})
+    return "<profile>\n" + json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n</profile>"
 
 
 def web_search_enabled() -> bool:
-    return os.environ.get("GAP_WEB_SEARCH", "1").strip().lower() not in ("0", "false", "no", "off")
+    return settings.get("GAP_WEB_SEARCH").lower() not in ("0", "false", "no", "off")
 
 
 def shared_tools() -> list[dict]:
@@ -201,16 +209,16 @@ def shared_tools() -> list[dict]:
     submit_cv is live; submit_gap_report and web_search are declared deferred and only
     surfaced (with tool_addition) by the gap-report call.
     """
-    from cvgen.gaps import GAP_TOOL, WEB_SEARCH_TOOL  # deferred import: cvgen.gaps imports this module
+    from cvgen.gaps import GAP_TOOL, web_search_tool  # deferred import: cvgen.gaps imports this module
 
-    return [TOOL, GAP_TOOL] + ([WEB_SEARCH_TOOL] if web_search_enabled() else [])
+    return [TOOL, GAP_TOOL] + ([web_search_tool()] if web_search_enabled() else [])
 
 
 def shared_system(profile: dict, task_prompt: str) -> list[dict]:
     """Shared rules + profile (cached), then the task (not cached)."""
     return [
         {"type": "text", "text": SHARED_PROMPT},
-        {"type": "text", "text": profile_block(profile), "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": profile_block(profile), "cache_control": settings.cache_control()},
         {"type": "text", "text": task_prompt},
     ]
 
@@ -248,15 +256,17 @@ class TailorResult:
     gaps: list[str]
     problems: list[str]  # validation errors left in this CV; empty for a successful tailor()
     repairs: list[dict]  # one entry per rejected submission: {"attempt": n, "errors": [...]}
-    usage: dict  # summed over all calls, plus "calls": per-call usage
+    usage: dict  # token counts summed over all calls, plus "calls": one cvgen.costs row per call
     model: str
     raw: dict = field(repr=False)  # the last submit_cv tool input as returned
+    python_fixes: list[str] = field(default_factory=list)  # removals python_fixes() made instead of a repair call
 
     def meta(self) -> dict:
         """Everything for cv.meta.json: traceability and diagnostics, never rendered."""
         return {
             "company": self.company, "role": self.role, "model": self.model, "sources": self.sources,
-            "gaps": self.gaps, "problems": self.problems, "repairs": self.repairs, "usage": self.usage,
+            "gaps": self.gaps, "problems": self.problems, "repairs": self.repairs, "python_fixes": self.python_fixes,
+            "usage": self.usage,
         }
 
 
@@ -358,6 +368,21 @@ def assemble(tailored: TailoredCV, profile: Profile) -> tuple[dict, dict, list[s
     return cv, sources, problems
 
 
+def python_fixes(cv: dict) -> list[str]:
+    """Fix in place, without a repair call, too many skills: the largest category (later on ties)
+    loses its last skill until the total fits. Nothing is ever added or reworded. Text over a length
+    limit (headline, summary, bullets) goes back to Claude instead, so no content is cut blindly."""
+    fixes = []
+    lines = [[s.strip() for s in split_list(line["skills"])] for line in cv.get("skills", [])]
+    while sum(map(len, lines)) > limits.MAX_SKILLS_TOTAL:
+        size, i = max((len(names), i) for i, names in enumerate(lines))
+        if size < 2:
+            break
+        fixes.append(f"skills ({cv['skills'][i]['category']}): removed '{lines[i].pop()}' to fit {limits.MAX_SKILLS_TOTAL} skills")
+        cv["skills"][i]["skills"] = ", ".join(lines[i])
+    return fixes
+
+
 def _repair_message(tool_use_id: str, errors: list[str]) -> dict:
     listing = "\n".join(f"- {e}" for e in errors)
     return {"role": "user", "content": [{
@@ -392,11 +417,11 @@ def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None,
     if checked.errors:
         raise TailorError("profile has errors:\n" + "\n".join(checked.errors))
     client = client or anthropic.Anthropic()
-    model = model or os.environ.get("CV_MODEL") or DEFAULT_MODEL
-    effort = effort or os.environ.get("CV_EFFORT") or DEFAULT_EFFORT
+    model = model or settings.tailor_model()
+    effort = effort or settings.tailor_effort()
     request = build_request(profile, jd, model, effort)
     messages = list(request["messages"])
-    calls, repairs = [], []
+    usages, calls, repairs = [], [], []  # usages: raw token counts for totals; calls: one cost row per call
     nudged = False  # tool_choice is "auto": allow one reminder if Claude answers without the tool
     progress(f"Tailoring with {model} (effort {effort})")
 
@@ -404,7 +429,8 @@ def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None,
         with client.beta.messages.stream(**{**request, "messages": messages}) as stream:
             message = stream.get_final_message()
         usage = _usage(message)
-        calls.append(usage)
+        usages.append(usage)
+        calls.append(costs.call_row("repair" if repairs else "tailor", message, effort))
         log.info(
             "tailor %s (call %d): input=%d output=%d cache_write=%d cache_read=%d stop=%s",
             message.model, len(calls), usage["input_tokens"], usage["output_tokens"],
@@ -433,15 +459,19 @@ def tailor(profile: dict, jd: str, *, client: anthropic.Anthropic | None = None,
             tailored = TailoredCV.model_validate(raw)
         except ValidationError as exc:
             errors = [f"submit_cv input {'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()]
-            cv, sources, company, role, gaps = {}, {}, "", "", []
+            cv, sources, company, role, gaps, fixes = {}, {}, "", "", [], []
         else:
             cv, sources, errors = assemble(tailored, checked.profile)
             company, role, gaps = tailored.company, tailored.role, tailored.gaps
+            fixes = python_fixes(cv)
+            for fix in fixes:
+                log.info("tailor: fixed in Python: %s", fix)
             errors += validate(cv, {"sources": sources}, profile)
 
-        total = {k: sum(c[k] for c in calls) for k in calls[0]}
+        total = {k: sum(u[k] for u in usages) for k in usages[0]}
         result = TailorResult(cv=cv, company=company, role=role, sources=sources, gaps=gaps, problems=errors,
-                              repairs=repairs, usage={**total, "calls": calls}, model=message.model, raw=raw)
+                              repairs=repairs, usage={**total, "calls": calls}, model=message.model, raw=raw,
+                              python_fixes=fixes)
         if not errors:
             return result
         for error in errors:

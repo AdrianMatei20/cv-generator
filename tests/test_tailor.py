@@ -205,3 +205,23 @@ def test_tailor_gives_up_after_max_repairs_and_saves_draft(profile, tmp_path):
     meta = json.loads((tmp_path / "cv.draft.meta.json").read_text(encoding="utf-8"))
     assert draft["experience"][1]["bullets"][0].endswith("450 clients")
     assert len(meta["repairs"]) == MAX_REPAIRS + 1 and meta["problems"]
+
+
+def test_python_fixes_only_remove_extra_skills(monkeypatch):
+    monkeypatch.setattr(tailor_mod.limits, "MAX_SKILLS_TOTAL", 4)
+    headline = "Backend Engineer – Node.js | " + "x" * 120
+    cv = {"headline": headline,
+          "skills": [{"category": "A", "skills": "Node.js, TypeScript, NestJS"}, {"category": "B", "skills": "SQL, AWS (S3, Lambda)"}]}
+    fixes = tailor_mod.python_fixes(cv)
+    assert cv["headline"] == headline  # too long, but text goes back to Claude, never cut in Python
+    assert cv["skills"] == [{"category": "A", "skills": "Node.js, TypeScript"}, {"category": "B", "skills": "SQL, AWS (S3, Lambda)"}]
+    assert len(fixes) == 1
+
+
+def test_tailor_sends_a_long_headline_back_for_repair(profile):
+    long = selection(headline={"text": "Backend Engineer – Node.js / TypeScript | " + "x" * 100, "source_ids": ["headline-backend"]})
+    client = FakeClient([fake_message([tool_call(long)]), fake_message([tool_call(selection(), "toolu_2")])])
+    result = tailor(profile, "Some JD", client=client)
+    assert len(client.requests) == 2 and result.problems == []
+    assert "headline is 142 characters" in result.repairs[0]["errors"][0]
+

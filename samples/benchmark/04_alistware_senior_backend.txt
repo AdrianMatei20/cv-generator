@@ -1,0 +1,33 @@
+Senior Backend Engineer (Node.js / TypeScript)
+A-listware · Remote (dev hubs in Ukraine, Poland, Romania, Austria and Germany)
+
+About the customer:
+A data-driven TravelTech/InsurTech platform for real-time travel care, streamlined claims, and proactive disruption management.
+
+Responsibilities:
+- Build, improve, and release scalable, high-performance backend services for web and mobile products.
+- Own backend features end-to-end, from design through testing, deployment, and production support.
+- Write clean, maintainable, well-documented TypeScript.
+- Design and optimize PostgreSQL schemas, queries, and data flows.
+- Contribute to architecture decisions and code reviews.
+- Investigate production issues and improve reliability, performance, and maintainability.
+- Work closely with product and engineering teams in a fast-paced environment.
+
+Required:
+- 6+ years of professional backend development experience
+- 3+ years of recent hands-on Node.js experience
+- Advanced TypeScript proficiency
+- Practical production experience with NestJS
+- Solid PostgreSQL or relational database experience
+- Experience with scalable production systems
+- Deep understanding of backend fundamentals (APIs, service design, architecture, performance, reliability)
+- Strong troubleshooting skills, including production issue investigation
+- Ability to work independently with limited supervision
+- Excellent communication and fluent English
+
+Nice to have:
+- AWS and cloud-based production systems
+- Microservices and/or distributed architecture
+- Event-driven or asynchronous processing, queues/message brokers, caching, real-time workflows
+- Docker, Kubernetes, and modern CI/CD
+- Experience improving backend performance, observability, scalability, and reliability

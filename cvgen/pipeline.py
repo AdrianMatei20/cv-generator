@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 from cvgen import limits
 from pydantic import ValidationError
 
-from cvgen.cost import run_cost
+from cvgen import costs
 from cvgen.gaps import gap_report, update_backlog, write_gap_report
 from cvgen.layout import LayoutReport, check_layout, fix_layout
 from cvgen.output import candidate_filename, create_output_dir
@@ -40,6 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PROFILE = REPO_ROOT / "profile.json"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output"
 MAX_RETRIES = 6
+COSTS_CSV = "costs.csv"  # one summary line per CV, in the output root
 ANON_BASENAME = "CV_JohnDoe"  # same name and anonymize() as the legacy generate.py
 
 log = logging.getLogger(__name__)
@@ -145,7 +146,11 @@ def run(jd: str, company: str | None = None, role: str | None = None, *, pages: 
             folder = create_output_dir(output_root, company or failed.company, role or failed.role, today)
             _write_jd(folder, jd)
             _write_json(folder / "cv.draft.json", failed.cv)
-            _write_json(folder / "cv.draft.meta.json", failed.meta())
+            draft_meta = failed.meta()
+            draft_meta["calls"] = failed.usage.get("calls", [])
+            draft_meta["cost_usd"] = costs.totals(draft_meta["calls"])["cost_usd"]
+            _write_json(folder / "cv.draft.meta.json", draft_meta)
+            costs.append_csv(Path(output_root) / COSTS_CSV, folder.name, failed.model, draft_meta["calls"])
             raise PipelineError(f"{exc}\nDraft saved in {folder}. Fix cv.draft.json by hand, save it as cv.json, "
                                 f"then run: cvgen rerender \"{folder}\"") from exc
 
@@ -158,7 +163,7 @@ def run(jd: str, company: str | None = None, role: str | None = None, *, pages: 
         try:
             cv, sources, layout_meta = fix_layout(
                 result.cv, result.sources, profile, jd, folder, f"CV_{candidate_filename()}", client=client,
-                model=model, max_rounds=None if layout_fix else 0, progress=progress)
+                max_rounds=None if layout_fix else 0, progress=progress)  # LAYOUT_MODEL
         except TailorError as exc:
             raise PipelineError(f"{exc}. Is LibreOffice installed and not already running headless?") from exc
         pages_limit = limits.MAX_PAGES
@@ -166,18 +171,20 @@ def run(jd: str, company: str | None = None, role: str | None = None, *, pages: 
     progress("Rendering the anonymized CV")
     render_anonymized(cv, folder)
 
-    gap_meta = None
+    gap_meta, gap_calls = None, []
     if gaps:
         try:
-            gap = gap_report(profile, jd, client=client, model=model, progress=progress)
+            gap = gap_report(profile, jd, client=client, progress=progress)  # GAP_MODEL, not the tailor model
             write_gap_report(folder, gap, final_company, final_role)
             update_backlog(output_root)
             gap_meta = {"fit": gap.report["fit"]["score"], "repairs": len(gap.repairs), "web_search": gap.web_search,
                         "usage": gap.usage}
+            gap_calls = gap.usage.get("calls", [])
         except (TailorError, anthropic.APIError, ValidationError) as exc:  # the CV is done; keep it
             log.warning("gap report failed: %s", exc)
             progress(f"Gap report failed: {str(exc).splitlines()[0]}")
             gap_meta = {"error": str(exc)}
+            gap_calls = getattr(exc, "calls", [])
 
     meta = result.meta()
     meta.update(company=final_company, role=final_role, sources=sources, layout=layout_meta,
@@ -186,9 +193,13 @@ def run(jd: str, company: str | None = None, role: str | None = None, *, pages: 
         meta["gap_report"] = gap_meta
     if (company and company != result.company) or (role and role != result.role):
         meta["extracted"] = {"company": result.company, "role": result.role}
-    meta["cost_usd"] = run_cost(meta)
+    calls = result.usage.get("calls", []) + layout_meta.get("usage", {}).get("calls", []) + gap_calls
+    meta["calls"] = calls  # one row per API call: step, model, effort, tokens, web searches, cost_usd
+    meta["cost_usd"] = costs.totals(calls)["cost_usd"]
+    meta["cost_by_step"] = costs.by_bucket(calls)
     _write_json(folder / "cv.json", cv)
     _write_json(folder / "cv.meta.json", meta)
+    costs.append_csv(Path(output_root) / COSTS_CSV, folder.name, result.model, calls)
     log.info("done: %s (%d page(s), %d widow(s))", folder, layout_meta["final_pages"], layout_meta["final_widows"])
     return folder
 

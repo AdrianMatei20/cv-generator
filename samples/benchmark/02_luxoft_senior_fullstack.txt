@@ -1,0 +1,14 @@
+About the job
+Project descriptionJoin our Development Center in Bucharest, and become a member of our open-minded, progressive and professional team. In this role you will be working on projects for one our world famous clients. You will have a chance to grow your technical and soft skills, and build a thorough expertise of the industry of our client. On top of attractive salary and benefits package, Luxoft will invest into your professional training, and allow you to grow your professional career.
+Responsibilities
+Code reviews (PR's)
+Developing applications in an enterprise environment, using Agile development methodologies
+Develop and maintain frontend features using Angular (v20+) and TypeScript
+
+SkillsMust have
+Frontend Tech Stack: Hands-on knowledge in developing Single Page Applications (SPAs) using Angular, and TypeScript.
+Strong experience in responsive design, web accessibility (a11y), and CSS3/SCSS (Bootstrap 4+).
+Junit/ Unit Testing: Proven experience in consuming and developing Node.js REST services, as well as unit testing with Karma/Jasmine or Jest.
+Ability to quickly understand and navigate complex codebases and architectures
+Proactive mindset with strong problem-solving and communication skills
+Experience working in agile environments, with the ability to operate independently.

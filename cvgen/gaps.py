@@ -9,7 +9,7 @@ web_search are declared deferred in cvgen.tailor.shared_tools), same betas, same
 rules and profile. Only the task prompt after the cache breakpoint differs, and a
 mid-conversation system message swaps submit_cv out and the gap tools in.
 
-Links: with GAP_WEB_SEARCH on (default), Claude may use Anthropic's server-side web search,
+Links: with GAP_WEB_SEARCH=1 (opt-in; off by default), Claude may use Anthropic's server-side web search,
 and a recommendation keeps its url only if that exact address came back in the search
 results. Otherwise url is null and the report links to a web search for "<title> <provider>".
 """
@@ -20,7 +20,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal, Optional
 from urllib.parse import quote_plus, urlsplit, urlunsplit
@@ -28,14 +28,16 @@ from urllib.parse import quote_plus, urlsplit, urlunsplit
 import anthropic
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from cvgen import costs, settings
 from cvgen import tailor as _tailor
 from cvgen.profile import check_profile
-from cvgen.tailor import DEFAULT_EFFORT, DEFAULT_MODEL, MAX_REPAIRS, TailorError, _usage, strict_schema
+from cvgen.tailor import MAX_REPAIRS, TailorError, _usage, strict_schema
 
 TOOL_NAME = "submit_gap_report"
 MAX_TOKENS = 32000
-MAX_SEARCHES = 6
 MAX_PAUSES = 3  # resumes of a server-tool loop that hit its iteration limit (stop_reason "pause_turn")
+
+RECOMMENDATIONS_CACHE = Path(__file__).resolve().parent.parent / "data" / "cache" / "recommendations_cache.json"  # not data/*.json: generate.py renders those
 
 log = logging.getLogger(__name__)
 
@@ -66,15 +68,16 @@ class Requirement(_Model):
 
 class Recommendation(_Model):
     requirement_ids: list[str] = Field(description="Ids of the partial/missing requirements this closes.")
-    type: Literal["course", "certification", "project", "reading", "practice"]
-    title: str
-    provider: str
-    why: str = Field(description="One sentence on why this closes the gap.")
-    effort_hours: float
-    cost: str = Field(description="'free' or an approximate price with currency.")
-    project_idea: Optional[str] = Field(description="Projects only: what to build in 1-2 weekends, combining the gap with existing skills.")
-    github: Optional[str] = Field(description="Projects only: what to put in the repo to show it.")
-    url: Optional[str] = Field(description="Only an address that appeared in web search results; otherwise null.")
+    cached: Optional[str] = Field(default=None, description="Id of a saved recommendation to reuse (e.g. 'aws-1'); then leave the other fields out.")
+    type: Optional[Literal["course", "certification", "project", "reading", "practice"]] = None
+    title: str = ""
+    provider: str = ""
+    why: str = Field(default="", description="One sentence on why this closes the gap.")
+    effort_hours: float = 0
+    cost: str = Field(default="", description="'free' or an approximate price with currency.")
+    project_idea: Optional[str] = Field(default=None, description="Projects only: what to build in 1-2 weekends, combining the gap with existing skills.")
+    github: Optional[str] = Field(default=None, description="Projects only: what to put in the repo to show it.")
+    url: Optional[str] = Field(default=None, description="Only an address that appeared in web search results; otherwise null.")
 
 
 class GapReport(_Model):
@@ -92,22 +95,30 @@ GAP_TOOL = {
     "input_schema": strict_schema(GapReport),
     "defer_loading": True,  # declared in every profile call, surfaced only by the gap call
 }
-# allowed_callers: this version is code-execution-only by default when surfaced from deferred.
-WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": MAX_SEARCHES,
-                   "defer_loading": True, "allowed_callers": ["direct"]}
+def web_search_tool() -> dict:
+    # allowed_callers: this version is code-execution-only by default when surfaced from deferred.
+    return {"type": "web_search_20260209", "name": "web_search", "max_uses": settings.gap_max_searches(),
+            "defer_loading": True, "allowed_callers": ["direct"]}
 
 
 # ---------------------------
 # PROMPT AND REQUEST
 # ---------------------------
-def gap_prompt(web_search: bool) -> str:
+def gap_prompt(web_search: bool, options: dict[str, dict] | None = None) -> str:
+    options = options or {}
     url_rule = (
-        f"Use the web_search tool (at most {MAX_SEARCHES} searches; one search can cover several recommendations, "
-        "so start with the top ones) to find each recommendation's official page. Put in `url` only an address that "
-        "appeared in your search results; if you found none, use null. Never write a URL from memory."
+        f"Search for the official page of each new recommendation for a missing or partial must-have requirement, "
+        f"using up to {settings.gap_max_searches()} searches (one search can cover several recommendations). Skip searching "
+        "only when every must-have is 'have' or reuses a saved recommendation. Put in `url` only an address that appeared "
+        "in your search results; otherwise null. Never write a URL from memory."
         if web_search else
         "Always null. The application adds links itself; never write a URL from memory."
     )
+    saved = "\n".join(f"- {ref}: [{o['skill']}] {o['type']}: {o['title']} ({o['provider']})" for ref, o in options.items())
+    saved_rule = (
+        "\nSaved recommendations from earlier reports. When one fits a gap, reuse it instead of writing a new one: "
+        "add {\"requirement_ids\": [...], \"cached\": \"<id>\"} and leave every other field out.\n" + saved + "\n"
+        if options else "")
     return f"""\
 Task: write an honest skill-gap report for this JD. Submit it by calling the {TOOL_NAME} tool exactly once; don't answer in plain text.
 
@@ -128,14 +139,15 @@ Recommendations
 - effort_hours: a realistic estimate. cost: "free" or an approximate price with currency (e.g. "about $150 exam fee").
 - For a project: `project_idea` is a concrete thing to build in 1-2 weekends that combines the missing skill with skills the candidate already has (name them), and `github` says what to put in the repo to show it (README with an architecture diagram, tests, a CI badge, a deployed demo). For other types set both to null.
 - url: {url_rule}
-
+{saved_rule}
 Quick wins: up to 3 things the candidate could do this week that would most improve their fit for similar jobs.
 
 The candidate reads this report: write to them in the second person ("you", "your") in every field. Plain text; no markdown.
 """
 
 
-def build_gap_request(profile: dict, jd: str, model: str, effort: str, web_search: bool) -> dict:
+def build_gap_request(profile: dict, jd: str, model: str, effort: str, web_search: bool,
+                      options: dict[str, dict] | None = None) -> dict:
     """Same tools, betas, shared rules and profile as the tailoring call (so the prefix is a
     cache hit); the task prompt and a tool swap come after the breakpoint."""
     changes = [{"type": "tool_removal", "tool": {"type": "tool_reference", "name": _tailor.TOOL_NAME}},
@@ -146,12 +158,12 @@ def build_gap_request(profile: dict, jd: str, model: str, effort: str, web_searc
         "model": model,
         "max_tokens": MAX_TOKENS,
         "betas": _tailor.BETAS,
-        "fallbacks": "default",
+        **({"fallbacks": "default"} if settings.supports_fallbacks(model) else {}),
         "thinking": {"type": "adaptive"},
         "output_config": {"effort": effort},
         "tools": _tailor.shared_tools(),
         "tool_choice": {"type": "auto"},
-        "system": _tailor.shared_system(profile, gap_prompt(web_search)),
+        "system": _tailor.shared_system(profile, gap_prompt(web_search, options)),
         "messages": [
             {"role": "user", "content": f"<job_description>\n{jd.strip()}\n</job_description>\n\n"
                                         f"Write the skill-gap report for this job and submit it with {TOOL_NAME}."},
@@ -163,7 +175,7 @@ def build_gap_request(profile: dict, jd: str, model: str, effort: str, web_searc
 # ---------------------------
 # VALIDATION AND LINKS
 # ---------------------------
-def validate_report(report: GapReport, profile: dict) -> list[str]:
+def validate_report(report: GapReport, profile: dict, options: dict[str, dict] | None = None) -> list[str]:
     errors = []
     index = check_profile(profile).profile.index()
     if not 0 <= report.fit.score <= 100:
@@ -199,6 +211,12 @@ def validate_report(report: GapReport, profile: dict) -> list[str]:
                 errors.append(f"{where}: points to '{req_id}' ({req.name}), which the candidate already has")
             else:
                 covered.add(req_id)
+        if rec.cached:
+            if rec.cached not in (options or {}):
+                errors.append(f"{where}: cached id '{rec.cached}' isn't one of the saved recommendations")
+            continue
+        if rec.type is None:
+            errors.append(f"{where}: type is missing")
         for key in ("title", "provider", "why", "cost"):
             if not getattr(rec, key).strip():
                 errors.append(f"{where}: {key} is empty")
@@ -254,6 +272,8 @@ def resolve_links(report: dict, allowed: set[str]) -> tuple[dict, list[str]]:
     report = copy.deepcopy(report)
     dropped = []
     for rec in report["recommendations"]:
+        if rec.get("cached"):
+            continue
         url = rec.get("url")
         if url and _norm_url(url) not in allowed:
             dropped.append(url)
@@ -261,6 +281,82 @@ def resolve_links(report: dict, allowed: set[str]) -> tuple[dict, list[str]]:
         rec["url"] = url
         rec["search_url"] = None if url else search_link(rec["title"], rec["provider"])
     return report, dropped
+
+
+# ---------------------------
+# RECOMMENDATIONS CACHE
+# ---------------------------
+CACHE_DAYS = 90
+CACHE_PER_SKILL = 3
+CACHE_FIELDS = ("type", "title", "provider", "why", "effort_hours", "cost", "url")
+
+
+def cache_key(skill: str) -> str:
+    return re.sub(r"\s+", " ", skill.strip()).lower()
+
+
+def load_cache(path: Path = RECOMMENDATIONS_CACHE, today: date | None = None) -> dict:
+    """{skill key: {"label", "saved", "recommendations": [...]}} without entries older than CACHE_DAYS."""
+    path = Path(path)
+    if not path.is_file():
+        return {}
+    try:
+        skills = json.loads(path.read_text(encoding="utf-8")).get("skills", {})
+    except (ValueError, AttributeError):
+        log.warning("ignoring unreadable %s", path)
+        return {}
+    cutoff = (today or date.today()) - timedelta(days=CACHE_DAYS)
+    return {k: v for k, v in skills.items() if date.fromisoformat(v.get("saved", "1970-01-01")) >= cutoff}
+
+
+def cached_options(cache: dict) -> dict[str, dict]:
+    """Reference ids Claude can use, e.g. "aws-1" -> the first saved recommendation for AWS."""
+    options = {}
+    for key, entry in sorted(cache.items()):
+        for n, rec in enumerate(entry["recommendations"], 1):
+            options[f"{re.sub(r'[^a-z0-9]+', '-', key).strip('-')}-{n}"] = {**rec, "skill": entry["label"]}
+    return options
+
+
+def save_to_cache(report: dict, path: Path = RECOMMENDATIONS_CACHE, today: date | None = None) -> int:
+    """Store this report's new (non-project, non-cached) recommendations under the skills they close."""
+    path = Path(path)
+    stamp = (today or date.today()).isoformat()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except ValueError:
+        data = {}
+    skills = data.setdefault("skills", {})
+    by_id = {r["id"]: r for r in report["requirements"]}
+    saved = 0
+    for rec in report["recommendations"]:
+        if rec.get("cached") or rec["type"] == "project":
+            continue
+        for req_id in rec["requirement_ids"]:
+            req = by_id.get(req_id)
+            if req is None:
+                continue
+            entry = skills.setdefault(cache_key(req["skill"]), {"label": req["skill"].strip(), "recommendations": []})
+            kept = [r for r in entry["recommendations"] if r["title"].lower() != rec["title"].lower()]
+            entry["recommendations"] = ([{k: rec.get(k) for k in CACHE_FIELDS}] + kept)[:CACHE_PER_SKILL]
+            entry["saved"] = stamp
+            saved += 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"version": 1, "skills": skills}, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
+                    encoding="utf-8")
+    return saved
+
+
+def expand_cached(report: dict, options: dict[str, dict]) -> dict:
+    """Replace {"cached": "aws-1", ...} recommendations with the saved one (keeping requirement_ids)."""
+    report = copy.deepcopy(report)
+    for rec in report["recommendations"]:
+        ref = rec.get("cached")
+        if ref and ref in options:
+            saved = options[ref]
+            rec.update({k: saved.get(k) for k in CACHE_FIELDS}, project_idea=None, github=None)
+            rec["search_url"] = None if rec.get("url") else search_link(rec["title"], rec["provider"])
+    return report
 
 
 # ---------------------------
@@ -291,15 +387,22 @@ def _repair_message(tool_use_id: str, errors: list[str]) -> dict:
 
 
 def gap_report(profile: dict, jd: str, *, client=None, model: str | None = None, effort: str | None = None,
-               progress=None) -> GapResult:
+               progress=None, cache_path: Path = None) -> GapResult:
     progress = progress or (lambda message: None)
+    cache_path = Path(cache_path or RECOMMENDATIONS_CACHE)
     client = client or anthropic.Anthropic()
-    model = model or os.environ.get("CV_MODEL") or DEFAULT_MODEL
-    effort = effort or os.environ.get("CV_EFFORT") or DEFAULT_EFFORT
+    model = model or settings.gap_model()
+    effort = effort or settings.gap_effort()
     web_search = _tailor.web_search_enabled()
-    request = build_gap_request(profile, jd, model, effort, web_search)
+    options = cached_options(load_cache(cache_path))
+    request = build_gap_request(profile, jd, model, effort, web_search, options)
     messages = list(request["messages"])
-    contents, calls, repairs, searches, pauses = [], [], [], 0, 0
+    contents, usages, calls, repairs, searches, pauses = [], [], [], [], 0, 0
+
+    def fail(text: str) -> TailorError:  # carries the calls already paid for, so their cost is recorded
+        error = TailorError(text)
+        error.calls = list(calls)
+        return error
     progress("Gap report" + (" (with web search)" if web_search else ""))
 
     while True:
@@ -308,44 +411,48 @@ def gap_report(profile: dict, jd: str, *, client=None, model: str | None = None,
         usage = _usage(message)
         usage["web_search_requests"] = _web_searches(message)
         searches += usage["web_search_requests"]
-        calls.append(usage)
+        usages.append(usage)
+        calls.append(costs.call_row("gap repair" if repairs else "gap report", message, effort))
         log.info("gap report %s (call %d): input=%d output=%d cache_read=%d searches=%d stop=%s", message.model,
                  len(calls), usage["input_tokens"], usage["output_tokens"], usage["cache_read_input_tokens"],
                  usage["web_search_requests"], message.stop_reason)
         if message.stop_reason == "refusal":
-            raise TailorError("gap report refused")
+            raise fail("gap report refused")
         if message.stop_reason == "max_tokens":
-            raise TailorError(f"gap report hit max_tokens={MAX_TOKENS}")
+            raise fail(f"gap report hit max_tokens={MAX_TOKENS}")
         contents.append(message.content)
         messages.append({"role": "assistant", "content": message.content})
         if message.stop_reason == "pause_turn":  # server-side search loop paused; resend to resume
             pauses += 1
             if pauses > MAX_PAUSES:
-                raise TailorError("gap report: web search kept pausing")
+                raise fail("gap report: web search kept pausing")
             continue
 
         call = next((b for b in message.content if b.type == "tool_use" and b.name == TOOL_NAME), None)
         if call is None:
-            raise TailorError(f"Claude didn't call {TOOL_NAME}")
+            raise fail(f"Claude didn't call {TOOL_NAME}")
         raw = copy.deepcopy(call.input)
         try:
             report = GapReport.model_validate(raw)
-            errors = validate_report(report, profile)
+            errors = validate_report(report, profile, options)
         except ValidationError as exc:
             report, errors = None, [f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()]
 
-        total = {k: sum(c[k] for c in calls) for k in calls[0]}
+        total = {k: sum(u[k] for u in usages) for k in usages[0]}
         if not errors:
             allowed = collect_result_urls(contents) if web_search else set()
             resolved, dropped = resolve_links(report.model_dump(), allowed)
+            resolved = expand_cached(resolved, options)
+            reused = sum(1 for r in resolved["recommendations"] if r.get("cached"))
+            save_to_cache(resolved, cache_path)
             for url in dropped:
                 log.warning("gap report: dropped a URL not found in search results: %s", url)
             return GapResult(report=resolved, usage={**total, "calls": calls}, model=message.model, repairs=repairs,
                              web_search={"enabled": web_search, "requests": searches, "urls_found": len(allowed),
-                                         "urls_dropped": dropped}, raw=raw)
+                                         "urls_dropped": dropped, "reused_from_cache": reused}, raw=raw)
         repairs.append({"attempt": len(repairs) + 1, "errors": errors})
         if len(repairs) > MAX_REPAIRS:
-            raise TailorError(f"gap report still invalid after {MAX_REPAIRS} repairs:\n" + "\n".join(f"  - {e}" for e in errors))
+            raise fail(f"gap report still invalid after {MAX_REPAIRS} repairs:\n" + "\n".join(f"  - {e}" for e in errors))
         progress(f"Repairing the gap report: {len(errors)} error(s) (attempt {len(repairs)}/{MAX_REPAIRS})")
         messages.append(_repair_message(call.id, errors))
 

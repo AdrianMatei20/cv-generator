@@ -178,7 +178,7 @@ class FakeClient:
 def test_fix_layout_rewrites_a_widow(tmp_path, profile, cv_and_sources, fake_render):
     cv, sources = cv_and_sources
     assert validate(cv, {"sources": sources}, profile) == []
-    client = FakeClient([{"rewrites": [{"path": "experience[0].bullets[0]", "text": FIXED}], "remove": []}])
+    client = FakeClient([{"rewrites": [{"path": "experience[0].bullets[0]", "text": FIXED}]}])
     final_cv, final_sources, meta = fix_layout(cv, sources, profile, "JD text", tmp_path, "CV_X", client=client)
     assert final_cv["experience"][0]["bullets"][0] == FIXED
     assert meta["kept_round"] == 1 and meta["final_widows"] == 0 and meta["final_pages"] == 1
@@ -194,8 +194,8 @@ def test_fix_layout_rewrites_a_widow(tmp_path, profile, cv_and_sources, fake_ren
 def test_fix_layout_rejects_invented_numbers_and_keeps_best(tmp_path, profile, cv_and_sources, fake_render):
     cv, sources = cv_and_sources
     invented = "Cut p95 latency of the merchant API from 900ms to 150ms with Redis caching"
-    client = FakeClient([{"rewrites": [{"path": "experience[0].bullets[0]", "text": invented}], "remove": []},
-                         {"rewrites": [{"path": "experience[0].bullets[0]", "text": WIDOW + " in production"}], "remove": []}])
+    client = FakeClient([{"rewrites": [{"path": "experience[0].bullets[0]", "text": invented}]},
+                         {"rewrites": [{"path": "experience[0].bullets[0]", "text": WIDOW + " in production"}]}])
     final_cv, _, meta = fix_layout(cv, sources, profile, "JD", tmp_path, "CV_X", client=client)
     assert meta["rounds"][1]["result"] == "rejected" and "150" in meta["rounds"][1]["validation_errors"][0]
     assert meta["rounds"][2]["result"] == "worse, discarded"  # still a widow, so not better than round 0
@@ -203,17 +203,34 @@ def test_fix_layout_rejects_invented_numbers_and_keeps_best(tmp_path, profile, c
     assert fake_render["calls"][-1] == cv  # re-rendered the kept version after the discarded round
 
 
-def test_fix_layout_trims_when_over_pages(tmp_path, profile, cv_and_sources, fake_render, monkeypatch):
+def test_fix_layout_trims_in_python_when_over_pages(tmp_path, profile, cv_and_sources, fake_render, monkeypatch):
     cv, sources = cv_and_sources
     cv["experience"][0]["bullets"][0] = FIXED  # no widows; only the page overflow
     monkeypatch.setattr(limits, "MAX_PAGES", 1)
     fake_render["lines_per_page"] = 7  # 8 lines -> 2 pages
-    client = FakeClient([{"rewrites": [], "remove": ["experience[1].bullets[1]"]}])
+    client = FakeClient([])  # no API call: the lowest-ranked bullet is dropped in Python
     final_cv, final_sources, meta = fix_layout(cv, sources, profile, "JD", tmp_path, "CV_X", client=client)
     assert final_cv["experience"][1]["bullets"] == ["Designed a PostgreSQL schema and REST API used by 300 warehouse clients"]
     assert final_sources["experience"][1]["bullets"] == [["exp-globex-01"]]
-    assert meta["rounds"][0]["over_pages"] and meta["final_pages"] == 1 and meta["kept_round"] == 1
-    assert "All bullets, for choosing what to remove" in client.requests[0]["messages"][0]["content"]
+    assert meta["rounds"][0]["over_pages"] and meta["final_pages"] == 1 and meta["kept_round"] == "trim 1"
+    assert meta["rounds"][1]["changes"] == [{"path": "experience[1].bullets[1]",
+                                              "removed": "Migrated 14 cron jobs to Kubernetes CronJobs with alerting"}]
+    assert client.requests == [] and meta["usage"] == {"calls": []}
+
+
+def test_layout_request_sends_only_widows_and_their_sources(profile, cv_and_sources, tmp_path, fake_render):
+    from cvgen.layout import build_request
+    from cvgen.profile import check_profile
+    cv, sources = cv_and_sources
+    from cvgen.layout import render as fake
+    _, pdf = fake(cv, tmp_path, "CV_X")
+    report = check_layout(pdf, cv)
+    request = build_request(cv, sources, report, check_profile(profile).profile, "claude-haiku-5-5")
+    text = request["messages"][0]["content"]
+    assert "experience[0].bullets[0]" in text and "[exp-acme-02] Cut p95 latency" in text
+    assert "Led root cause analysis" not in text and "job_description" not in text and "Globex" not in text
+    assert "fallbacks" not in request and "betas" not in request  # Haiku has no server-side fallback
+    assert "least relevant" not in request["system"]
 
 
 def test_fix_layout_does_nothing_when_clean(tmp_path, profile, cv_and_sources, fake_render):

@@ -6,24 +6,13 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from cvgen import cli, cost, limits, pipeline
+from cvgen import cli, limits, pipeline
 
 REPO = Path(__file__).resolve().parent.parent
 EXAMPLE = REPO / "profile.example.json"
 
 
 # ---------------------------------------------------------------- cost and limits
-def test_cost_estimate():
-    usage = {"input_tokens": 702, "output_tokens": 9569, "cache_creation_input_tokens": 22583, "cache_read_input_tokens": 0}
-    # 702*4 + 9569*20 + 22583*4*1.25 = 307,103 micro-dollars
-    assert cost.estimate(usage, "claude-opus-5-5") == pytest.approx(0.307103, abs=1e-6)
-    assert cost.estimate({"cache_read_input_tokens": 1_000_000}, "claude-opus-5-5") == pytest.approx(0.20)
-    assert cost.estimate(usage, "some-unknown-model") is None
-    meta = {"model": "claude-opus-5-5", "usage": usage, "layout": {"usage": {"input_tokens": 4314, "output_tokens": 580}}}
-    assert cost.run_cost(meta) == pytest.approx(0.307103 + (4314 * 4 + 580 * 20) / 1e6, abs=1e-4)
-    assert cost.fmt(0.4239) == "$0.42" and cost.fmt(None) == "n/a"
-
-
 def test_limits_override_restores():
     with limits.override(MAX_PAGES=1):
         assert limits.MAX_PAGES == 1

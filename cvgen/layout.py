@@ -28,13 +28,12 @@ import anthropic
 import pymupdf
 from pydantic import BaseModel, ConfigDict, Field
 
-from cvgen import limits
+from cvgen import costs, limits, settings
 from cvgen.profile_schema import Profile
 from cvgen.render import render
-from cvgen.tailor import DEFAULT_MODEL, FALLBACK_BETA, TailorError, _usage, strict_schema
+from cvgen.tailor import FALLBACK_BETA, TailorError, _usage, strict_schema
 from cvgen.validate import validate
 
-LAYOUT_EFFORT = "medium"
 TOOL_NAME = "rewrite_bullets"
 MAX_TOKENS = 16000
 _GLYPHS = "●•▪◦·‣∙○■□➢➤►-–—*"
@@ -191,12 +190,11 @@ class Rewrite(_Model):
 
 class RewritePlan(_Model):
     rewrites: list[Rewrite] = Field(description="One entry per widow you rewrite.")
-    remove: list[str] = Field(description="Paths of bullets to delete to get back within the page limit; empty if not over.")
 
 
 TOOL = {
     "name": TOOL_NAME,
-    "description": "Submit rewritten widow bullets and, if the CV is over the page limit, bullets to remove. Call exactly once.",
+    "description": "Submit the rewritten widow bullets. Call exactly once.",
     "strict": True,
     "input_schema": strict_schema(RewritePlan),
 }
@@ -205,11 +203,9 @@ def system_prompt() -> str:
     return f"""\
 You fix layout problems in a rendered CV. Call the {TOOL_NAME} tool exactly once; don't answer in plain text.
 
-Widows are bullets (or the summary) whose last line holds only a few words. For each widow, either shorten it so it fits on one line fewer, or extend it with true detail from its source bullets so the last line is fuller. Keep the meaning and the JD keywords it contains. A widow's entry tells you how many characters fit on a line; aim to end the last line at least half full, or remove the wrapped line entirely.
+Widows are bullets (or the summary) whose last line holds only a few words. For each widow, either shorten it so it fits on one line fewer, or extend it with true detail from its source bullets so the last line is fuller. Keep its meaning and every technology and skill it names. A widow's entry tells you how many characters fit on a line; aim to end the last line at least half full, or remove the wrapped line entirely.
 
 Use only facts from each widow's source bullets: no new numbers, tools, technologies or claims, and don't round or combine numbers. Start with a strong action verb, no first person (I, my, we, our), plain text without markdown or the characters < or >, and at most {limits.MAX_BULLET_CHARS} characters per bullet ({limits.MAX_SUMMARY_CHARS} for the summary).
-
-If the CV is over the page limit, also list in `remove` the paths of the bullets least relevant to the JD, enough to free about the number of lines you're told it's over. Prefer bullets from older roles and weaker projects. Never remove a job's or a project's only bullet, and never remove the summary.
 """
 
 
@@ -250,35 +246,28 @@ def _label(cv: dict, path: str) -> str:
     return f"{path} ({entry.get('company') or entry.get('name')})"
 
 
-def build_request(cv: dict, sources: dict, report: LayoutReport, profile: Profile, jd: str, model: str) -> dict:
+def build_request(cv: dict, sources: dict, report: LayoutReport, profile: Profile, model: str) -> dict:
+    """Only the widows and their source bullets: no JD, no profile, no other bullets."""
     index = profile.index()
-    parts = [f"<job_description>\n{jd.strip()}\n</job_description>", ""]
-    if report.over_pages:
-        parts.append(f"The CV renders to {report.pages} pages; the limit is {limits.MAX_PAGES}. "
-                     f"About {report.lines_over} lines are on the extra page(s).")
-    if report.widows:
-        parts.append("Widows to fix:")
-        for w in report.widows:
-            text = _get(cv, w.path)
-            parts += [
-                f"- path: {w.path}" + (f"  ({_label(cv, w.path)})" if w.path != "summary" else ""),
-                f"  text: {text}",
-                f"  {len(text)} characters on {len(w.lines)} lines; the last line holds {w.last_line_words} word(s): "
-                f"\"{_strip_glyph(w.lines[-1].text)}\"; a full line holds about {w.chars_per_line} characters",
-                "  source bullets:",
-                *[f"    {s}" for s in _source_lines(_bullet_sources(sources, w.path), index)],
-            ]
-    if report.over_pages:
-        parts += ["", "All bullets, for choosing what to remove:"]
-        parts += [f"- {_label(cv, path)}: {text}" for path, text in _items(cv) if path != "summary"]
+    parts = ["Widows to fix:"]
+    for w in report.widows:
+        text = _get(cv, w.path)
+        parts += [
+            f"- path: {w.path}",
+            f"  text: {text}",
+            f"  {len(text)} characters on {len(w.lines)} lines; the last line holds {w.last_line_words} word(s): "
+            f"\"{_strip_glyph(w.lines[-1].text)}\"; a full line holds about {w.chars_per_line} characters",
+            "  source bullets:",
+            *[f"    {s}" for s in _source_lines(_bullet_sources(sources, w.path), index)],
+        ]
     parts += ["", f"Submit the fixes with {TOOL_NAME}."]
     return {
         "model": model,
         "max_tokens": MAX_TOKENS,
-        "betas": [FALLBACK_BETA],
-        "fallbacks": "default",
+        # Haiku has no server-side refusal fallback; send it only where it's supported.
+        **({"betas": [FALLBACK_BETA], "fallbacks": "default"} if settings.supports_fallbacks(model) else {}),
         "thinking": {"type": "adaptive"},
-        "output_config": {"effort": LAYOUT_EFFORT},
+        "output_config": {"effort": settings.layout_effort()},
         "tools": [TOOL],
         "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
         "system": system_prompt(),
@@ -286,25 +275,32 @@ def build_request(cv: dict, sources: dict, report: LayoutReport, profile: Profil
     }
 
 
-def ask_claude(client, request: dict) -> tuple[RewritePlan, dict]:
+def ask_claude(client, request: dict, step: str = "layout") -> tuple[RewritePlan, dict, dict]:
+    """Returns (plan, token usage, cost row). A failure after the call carries its row in `.calls`."""
     with client.beta.messages.stream(**request) as stream:
         message = stream.get_final_message()
     usage = _usage(message)
+    row = costs.call_row(step, message, request["output_config"]["effort"])
     log.info("layout %s: input=%d output=%d stop=%s", message.model, usage["input_tokens"], usage["output_tokens"], message.stop_reason)
+
+    def fail(text):
+        error = TailorError(text)
+        error.calls = [row]
+        return error
     if message.stop_reason in ("refusal", "max_tokens"):
-        raise TailorError(f"layout rewrite stopped: {message.stop_reason}")
+        raise fail(f"layout rewrite stopped: {message.stop_reason}")
     call = next((b for b in message.content if b.type == "tool_use" and b.name == TOOL_NAME), None)
     if call is None:
-        raise TailorError(f"Claude didn't call {TOOL_NAME}")
-    return RewritePlan.model_validate(copy.deepcopy(call.input)), usage
+        raise fail(f"Claude didn't call {TOOL_NAME}")
+    return RewritePlan.model_validate(copy.deepcopy(call.input)), usage, row
 
 
 # ---------------------------
 # FIX: APPLY AND LOOP
 # ---------------------------
 def apply_plan(cv: dict, sources: dict, plan: RewritePlan, report: LayoutReport) -> tuple[dict, dict, list[dict]]:
-    """Apply rewrites (widows only) and removals (only when over pages); return new cv, sources, changes."""
-    cv, sources = copy.deepcopy(cv), copy.deepcopy(sources)
+    """Apply rewrites to flagged widows only; return new cv, sources (unchanged), changes."""
+    cv = copy.deepcopy(cv)
     widows = {w.path for w in report.widows}
     changes = []
     for rw in plan.rewrites:
@@ -320,25 +316,31 @@ def apply_plan(cv: dict, sources: dict, plan: RewritePlan, report: LayoutReport)
             m = _PATH.match(rw.path)
             cv[m[1]][int(m[2])]["bullets"][int(m[3])] = rw.text
         changes.append({"path": rw.path, "before": before, "after": rw.text})
-    removals = []
-    for path in plan.remove:
-        m = _PATH.match(path)
-        if not report.over_pages or not m:
-            changes.append({"path": path, "ignored": "removal not allowed" if m else "not a bullet path"})
-            continue
+    return cv, copy.deepcopy(sources), changes
+
+
+def trim_bullets(cv: dict, sources: dict, report: LayoutReport) -> tuple[dict, dict, list[dict]]:
+    """Free about report.lines_over lines without AI: repeatedly drop the last (lowest-ranked) bullet of the
+    entry with the most bullets, later entries first on ties; never an entry's only bullet."""
+    cv, sources = copy.deepcopy(cv), copy.deepcopy(sources)
+    need, freed, changes = max(report.lines_over, 1), 0, []  # re-render checks it; another pass follows if needed
+    while freed < need:
+        entries = [(len(e.get("bullets") or []), order, section, i)
+                   for order, (section, i, e) in enumerate((sec, i, e) for sec in ("experience", "projects")
+                                                           for i, e in enumerate(cv.get(sec) or []))
+                   if len(e.get("bullets") or []) >= 2]
+        if not entries:
+            break
+        _, _, section, i = max(entries)
+        j = len(cv[section][i]["bullets"]) - 1
+        path = f"{section}[{i}].bullets[{j}]"
+        placement = report.placements.get(path)
+        freed += len(placement.lines) if placement else 2
+        changes.append({"path": path, "removed": cv[section][i]["bullets"].pop()})
         try:
-            text = cv[m[1]][int(m[2])]["bullets"][int(m[3])]
-        except (IndexError, KeyError):
-            changes.append({"path": path, "ignored": "no such bullet"})
-            continue
-        removals.append((m[1], int(m[2]), int(m[3]), path, text))
-    for section, i, j, path, text in sorted(removals, key=lambda r: (r[0], r[1], -r[2])):  # delete from the end
-        del cv[section][i]["bullets"][j]
-        try:
-            del sources[section][i]["bullets"][j]
+            sources[section][i]["bullets"].pop()
         except (KeyError, IndexError):
             pass
-        changes.append({"path": path, "removed": text})
     return cv, sources, changes
 
 
@@ -360,7 +362,7 @@ def fix_layout(cv: dict, sources: dict, profile: dict, jd: str, folder: Path, ba
     progress = progress or (lambda message: None)
     max_rounds = limits.MAX_LAYOUT_ROUNDS if max_rounds is None else max_rounds
     profile_model = Profile.model_validate(profile)
-    model = model or os.environ.get("CV_MODEL") or DEFAULT_MODEL
+    model = model or settings.layout_model()
     progress("Rendering (LibreOffice)")
     pdf = _render_checked(cv, folder, basename)
     report = check_layout(pdf, cv)
@@ -369,25 +371,52 @@ def fix_layout(cv: dict, sources: dict, profile: dict, jd: str, folder: Path, ba
     rounds = [{"round": 0, **report.summary()}]
     best = (report, cv, sources, 0)
     rendered = 0
-    usage_calls = []
+    usages, calls = [], []  # token counts for totals; one cost row per call
 
+    # Page overflow: drop the lowest-ranked bullets in Python, re-render, repeat (no API call).
+    for t in range(1, 4):
+        base_report, base_cv, base_sources, base_round = best
+        if not base_report.over_pages:
+            break
+        new_cv, new_sources, changes = trim_bullets(base_cv, base_sources, base_report)
+        record = {"round": f"trim {t}", "based_on": base_round, "changes": changes}
+        if not changes:
+            rounds.append({**record, "result": "nothing left to trim"})
+            break
+        errors = validate(new_cv, {"sources": new_sources}, profile)
+        if errors:
+            rounds.append({**record, "result": "rejected", "validation_errors": errors})
+            break
+        progress(f"Layout: trimming {len(changes)} lowest-ranked bullet(s) to fit {limits.MAX_PAGES} page(s)")
+        pdf = _render_checked(new_cv, folder, basename)
+        rendered = record["round"]
+        report = check_layout(pdf, new_cv)
+        better = report.score() < base_report.score()
+        rounds.append({**record, "result": "kept" if better else "worse, discarded", **report.summary()})
+        if not better:
+            break
+        best = (report, new_cv, new_sources, record["round"])
+
+    # Widows: send only those bullets and their sources to LAYOUT_MODEL.
     for n in range(1, max_rounds + 1):
         base_report, base_cv, base_sources, base_round = best
-        if base_report.ok:
+        if not base_report.widows:
             break
-        progress(f"Layout round {n}/{max_rounds}: fixing {len(base_report.widows)} widow(s)"
-                 + (" and the page overflow" if base_report.over_pages else ""))
+        progress(f"Layout round {n}/{max_rounds}: fixing {len(base_report.widows)} widow(s)")
         client = client or anthropic.Anthropic()
         try:
-            plan, usage = ask_claude(client, build_request(base_cv, base_sources, base_report, profile_model, jd, model))
+            plan, usage, row = ask_claude(client, build_request(base_cv, base_sources, base_report, profile_model, model),
+                                          step=f"layout round {n}")
         except (TailorError, anthropic.APIError) as exc:  # the CV is already valid; keep the best so far
+            calls += getattr(exc, "calls", [])
             rounds.append({"round": n, "based_on": base_round, "result": f"failed: {exc}"})
             log.warning("layout round %d failed: %s", n, exc)
             break
-        usage_calls.append(usage)
+        usages.append(usage)
+        calls.append(row)
         new_cv, new_sources, changes = apply_plan(base_cv, base_sources, plan, base_report)
         record = {"round": n, "based_on": base_round, "changes": changes}
-        if not any("after" in c or "removed" in c for c in changes):
+        if not any("after" in c for c in changes):
             rounds.append({**record, "result": "no changes"})
             break
         errors = validate(new_cv, {"sources": new_sources}, profile)
@@ -411,7 +440,7 @@ def fix_layout(cv: dict, sources: dict, profile: dict, jd: str, folder: Path, ba
     if rendered != best_round:  # the files on disk are from a discarded round
         progress(f"Re-rendering the kept version (round {best_round})")
         _render_checked(best_cv, folder, basename)
-    total = {k: sum(u[k] for u in usage_calls) for k in usage_calls[0]} if usage_calls else {}
+    total = {k: sum(u[k] for u in usages) for k in usages[0]} if usages else {}
     meta = {"kept_round": best_round, "final_pages": best_report.pages, "final_widows": len(best_report.widows),
-            "rounds": rounds, "usage": {**total, "calls": usage_calls}}
+            "rounds": rounds, "usage": {**total, "calls": calls}}
     return best_cv, best_sources, meta

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pymupdf
 import pytest
 
-from cvgen import cost, gaps, layout, pipeline
+from cvgen import gaps, layout, pipeline
 from cvgen.gaps import GapReport, gap_report, render_markdown, resolve_links, update_backlog, validate_report
 
 REPO = Path(__file__).resolve().parent.parent
@@ -194,7 +194,7 @@ def test_gap_report_resumes_search_pause_repairs_and_filters_links(profile, monk
     recs = result.report["recommendations"]
     assert recs[1]["url"].startswith("https://aws.amazon.com/")  # found by search: kept
     assert recs[2]["url"] is None and result.web_search["urls_dropped"] == ["https://react.dev/learn/made-up-from-memory"]
-    assert result.web_search == {"enabled": True, "requests": 2, "urls_found": 1, "urls_dropped": recs and result.web_search["urls_dropped"]}
+    assert result.web_search == {"enabled": True, "requests": 2, "urls_found": 1, "urls_dropped": result.web_search["urls_dropped"], "reused_from_cache": 0}
     assert result.usage["web_search_requests"] == 2 and len(result.usage["calls"]) == 3
 
 
@@ -207,12 +207,6 @@ def test_web_search_off(profile, monkeypatch):
     assert "Always null" in request["system"][2]["text"]
     assert all(r["url"] is None and r["search_url"] for r in result.report["recommendations"])
     assert result.web_search["enabled"] is False
-
-
-def test_cost_includes_gap_report_and_searches():
-    meta = {"model": "claude-opus-5-5", "usage": {}, "layout": {"usage": {}},
-            "gap_report": {"usage": {"input_tokens": 1_000_000, "web_search_requests": 3}}}
-    assert cost.run_cost(meta) == pytest.approx(4.00 + 0.03)
 
 
 # ---------------------------------------------------------------- pipeline
@@ -246,3 +240,38 @@ def test_pipeline_writes_gap_report_and_backlog(profile, tmp_path, monkeypatch):
     assert meta["gap_report"]["fit"] == 62 and meta["settings"]["gaps"] is True
     assert meta["cost_usd"] > 0
     assert client.requests[0]["tools"] == client.requests[1]["tools"]  # one cache prefix for both calls
+
+
+# ---------------------------------------------------------------- recommendations cache
+def test_cache_saves_reuses_and_expires(tmp_path, profile):
+    from datetime import date
+    path = tmp_path / "cache.json"
+    resolved, _ = resolve_links(REPORT, {gaps._norm_url(REPORT["recommendations"][1]["url"])})
+    assert gaps.save_to_cache(resolved, path, today=date(2026, 10, 1)) == 2  # projects aren't cached
+    cache = gaps.load_cache(path, today=date(2026, 10, 29))
+    assert set(cache) == {"aws", "react"} and cache["aws"]["recommendations"][0]["title"].startswith("AWS Certified")
+    options = gaps.cached_options(cache)
+    assert set(options) == {"aws-1", "react-1"}
+    assert gaps.load_cache(path, today=date(2027, 1, 1)) == {}  # older than 90 days
+
+    reuse = copy.deepcopy(REPORT)
+    reuse["recommendations"][1] = {"requirement_ids": ["req-3"], "cached": "aws-1"}
+    assert validate_report(GapReport.model_validate(reuse), profile, options) == []
+    expanded = gaps.expand_cached(resolve_links(GapReport.model_validate(reuse).model_dump(), set())[0], options)
+    rec = expanded["recommendations"][1]
+    assert rec["title"].startswith("AWS Certified") and rec["url"].startswith("https://aws.amazon.com/")
+    assert rec["requirement_ids"] == ["req-3"] and rec["search_url"] is None
+
+
+def test_unknown_cached_reference_is_an_error(profile):
+    bad = copy.deepcopy(REPORT)
+    bad["recommendations"][1] = {"requirement_ids": ["req-3"], "cached": "kubernetes-9"}
+    errors = validate_report(GapReport.model_validate(bad), profile, {})
+    assert any("cached id 'kubernetes-9' isn't one of the saved recommendations" in e for e in errors)
+
+
+def test_prompt_lists_saved_recommendations_and_search_rule():
+    options = {"aws-1": {"skill": "AWS", "type": "certification", "title": "AWS SAA", "provider": "Amazon Web Services"}}
+    text = gaps.gap_prompt(True, options)
+    assert "- aws-1: [AWS] certification: AWS SAA (Amazon Web Services)" in text
+    assert "Skip searching only when every must-have" in text and "up to 3 searches" in text

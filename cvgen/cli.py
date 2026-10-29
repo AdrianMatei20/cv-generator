@@ -12,16 +12,17 @@ import json
 import logging
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import anthropic
 
-from cvgen import cost
+from cvgen import costs, settings
 from cvgen.pipeline import (ANON_BASENAME, DEFAULT_OUTPUT_ROOT, DEFAULT_PROFILE, MAX_RETRIES, PipelineError, SetupError, check_api_key,
                             check_libreoffice, load_profile_checked, rerender, run)
 from cvgen.tailor import TailorError
 
-COMMANDS = {"new", "batch", "rerender", "profile", "serve", "service", "-h", "--help"}
+COMMANDS = {"new", "batch", "rerender", "profile", "serve", "service", "costs", "bench", "-h", "--help"}
 
 
 # ---------------------------
@@ -119,7 +120,9 @@ def print_result(folder: Path) -> None:
           f"layout {lu.get('input_tokens', 0)} in / {lu.get('output_tokens', 0)} out"
           + (f"; gap report {gu.get('input_tokens', 0)} in / {gu.get('output_tokens', 0)} out, "
              f"{gu.get('cache_read_input_tokens', 0)} cache read" if gu else ""))
-    print(f"Estimated cost: {cost.fmt(meta.get('cost_usd'))} ({meta.get('model')})")
+    steps = meta.get("cost_by_step") or {}
+    detail = ", ".join(f"{name.replace('_', ' ')} {costs.fmt(usd)}" for name, usd in steps.items() if usd)
+    print(f"Estimated cost: {costs.fmt(meta.get('cost_usd'))} ({meta.get('model')})" + (f": {detail}" if detail else ""))
     print(f"\nFolder: {folder}")
     print(f"PDF:    {_pdf(folder)}")
     if _pdf(folder, anonymized=True):
@@ -199,10 +202,10 @@ def cmd_batch(args) -> int:
         total += run_cost or 0
         rel = folder.relative_to(DEFAULT_OUTPUT_ROOT.parent) if folder.is_relative_to(DEFAULT_OUTPUT_ROOT.parent) else folder
         rows.append([path.name, meta.get("company", ""), meta.get("role", ""), str(rel), _fit(folder),
-                     str(lay.get("final_pages", "")), str(lay.get("final_widows", "")), cost.fmt(run_cost), "ok"])
-        print(f"  done: {rel} ({cost.fmt(run_cost)})")
+                     str(lay.get("final_pages", "")), str(lay.get("final_widows", "")), costs.fmt(run_cost), "ok"])
+        print(f"  done: {rel} ({costs.fmt(run_cost)})")
 
-    print(f"\nSummary: {len(files) - failures} succeeded, {failures} failed, estimated total {cost.fmt(total)}\n")
+    print(f"\nSummary: {len(files) - failures} succeeded, {failures} failed, estimated total {costs.fmt(total)}\n")
     print_table(rows, ["JD", "Company", "Role", "Folder", "Fit", "Pages", "Widows left", "Cost", "Status"])
     if not args.no_gaps:
         print(f"\nSkills backlog: {DEFAULT_OUTPUT_ROOT / 'skills_backlog.md'}")
@@ -233,6 +236,98 @@ def cmd_service(args) -> int:
     lines = {"install": service.install, "uninstall": service.uninstall, "status": service.status}[args.action]()
     for line in lines:
         print(line)
+    return 0
+
+
+def _num(n) -> str:
+    return f"{int(n):,}"
+
+
+def cmd_costs(args) -> int:
+    lines = costs.read_csv(args.csv)
+    if not lines:
+        print(f"No costs recorded yet in {args.csv}. Every CV run adds a line.")
+        return 0
+    rows = []
+    for days in (7, 30):
+        r = costs.report(lines, days)
+        rows.append([f"last {days} days", str(r["cvs"]), costs.fmt(r["total"]), costs.fmt(r["per_cv"]),
+                     *(costs.fmt(r["per_step"][b]) for b in costs.BUCKETS)])
+    print(f"Average cost per CV, from {args.csv} ({len(lines)} CV(s) recorded)\n")
+    print_table(rows, ["Period", "CVs", "Total", "Per CV", "Tailor", "Repair", "Layout", "Gap report"])
+    return 0
+
+
+COMPARE_FILES = ("CV_*.pdf", "cv.json", "gap_report.md", "gap_report.json")
+
+
+def copy_for_compare(folder: Path, target: Path) -> None:
+    import shutil
+    target.mkdir(parents=True, exist_ok=True)
+    for pattern in COMPARE_FILES:
+        for f in folder.glob(pattern):
+            shutil.copy2(f, target / f.name)
+
+
+def cmd_bench(args) -> int:
+    files = sorted(Path(args.folder).glob("*.txt"))
+    if not files:
+        raise SetupError(f"No .txt files in {args.folder}")
+    load_profile_checked(args.profile)
+    check_api_key()
+    check_libreoffice()
+    root = DEFAULT_OUTPUT_ROOT / "bench"  # kept apart from your real output, costs.csv and skills backlog
+    compare = DEFAULT_OUTPUT_ROOT / "bench_compare" / args.label if args.label else None
+    if compare and compare.exists():
+        raise SetupError(f"{compare} already exists; pick another --label")
+    from cvgen import gaps
+    gaps.RECOMMENDATIONS_CACHE = root / f"recommendations_cache_{datetime.now():%Y%m%d_%H%M%S}.json"  # fresh per bench
+    rows, per_cv = [], []
+    for i, path in enumerate(files, 1):
+        print(f"\n[{i}/{len(files)}] {path.name}")
+        try:
+            folder = run(path.read_text(encoding="utf-8"), progress=Progress(), output_root=root,
+                         profile_path=args.profile, model=args.model)
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            print(f"  FAILED: {explain(exc)}")
+            continue
+        meta = _meta(folder)
+        rows += [{**r, "jd": path.name} for r in meta.get("calls", [])]
+        if compare:
+            copy_for_compare(folder, compare / path.stem)
+        per_cv.append((path.name, meta.get("company", ""), meta.get("cost_usd")))
+    if not rows:
+        print("\nNo successful runs.")
+        return 1
+
+    print(f"\nBenchmark: {len(per_cv)} CV(s) from {args.folder}, model {rows[0]['model']}, "
+          f"prices checked {costs.PRICES_CHECKED}\n")
+    table = costs.bench_table(rows)
+    total = costs.totals(rows)
+
+    def line(name, t):
+        return [name, str(t["calls"]), _num(t["input_tokens"]), _num(t["cache_write_5m_tokens"] + t["cache_write_1h_tokens"]),
+                _num(t["cache_read_tokens"]), _num(t["output_tokens"]), str(t["web_searches"]), costs.fmt(t["cost_usd"])]
+    print_table([line(t["step"], t) for t in table] + [line("TOTAL", total)],
+                ["Step", "Calls", "Input", "Cache write", "Cached", "Output", "Searches", "Cost"])
+    print("\nPer CV:")
+    for name, company, usd in per_cv:
+        print(f"  {name:45} {company:28} {costs.fmt(usd)}")
+    known = [usd for _, _, usd in per_cv if usd is not None]
+    if known:
+        print(f"  {'average':45} {'':28} {costs.fmt(sum(known) / len(known))}")
+    print("\nTop cost drivers:")
+    for n, (step, part, usd) in enumerate(costs.cost_drivers(rows), 1):
+        share = usd / total["cost_usd"] * 100 if total["cost_usd"] else 0
+        print(f"  {n}. {step}: {part}, {costs.fmt(usd)} ({share:.0f}% of the total)")
+    report = (compare or root) / ("bench.json" if compare else f"bench_{datetime.now():%Y-%m-%d_%H%M%S}.json")
+    report.parent.mkdir(parents=True, exist_ok=True)
+    settings_used = {k: settings.get(k) for k in settings.DEFAULTS}
+    report.write_text(json.dumps({"label": args.label, "settings": settings_used, "files": [f.name for f in files],
+                                  "calls": rows, "per_cv": per_cv}, indent=1), encoding="utf-8")
+    print(f"\nRaw rows: {report}")
     return 0
 
 
@@ -276,6 +371,17 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="run the local server for the CV Generator page (foreground)")
     serve.add_argument("--port", type=int, help="default: CVGEN_PORT or 8765")
     serve.set_defaults(func=cmd_serve)
+
+    cst = sub.add_parser("costs", help="average cost per CV and per step over the last 7 and 30 days")
+    cst.add_argument("--csv", type=Path, default=DEFAULT_OUTPUT_ROOT / "costs.csv")
+    cst.set_defaults(func=cmd_costs)
+
+    bench = sub.add_parser("bench", help="run every JD in samples/benchmark/ and print the cost per step (real API calls)")
+    bench.add_argument("folder", nargs="?", default=str(Path(__file__).resolve().parent.parent / "samples" / "benchmark"))
+    bench.add_argument("--label", help="also copy each CV's PDFs, cv.json and gap report to output/bench_compare/<label>/")
+    bench.add_argument("--model", help="tailor model (default: TAILOR_MODEL)")
+    bench.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    bench.set_defaults(func=cmd_bench)
 
     svc = sub.add_parser("service", help="start the server hidden at login (install/uninstall/status)")
     svc.add_argument("action", choices=("install", "uninstall", "status"))
