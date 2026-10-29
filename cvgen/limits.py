@@ -30,5 +30,5 @@ MAX_SKILLS_TOTAL = 60  # comma-separated items across all categories
 MAX_SKILL_LINE_CHARS = 2 * CHARS_PER_LINE  # category name + items, two lines
 
 # Layout pass (pipeline step 6).
-SHORT_LAST_LINE_WORDS = 4  # a bullet whose last line has this many words or fewer is rephrased
-MAX_LAYOUT_ROUNDS = 2
+WIDOW_MAX_WORDS = 4  # a wrapped bullet whose last line has this many words or fewer is a "widow"
+MAX_LAYOUT_ROUNDS = 2  # rewrite/re-render rounds after the first render

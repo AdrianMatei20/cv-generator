@@ -1,12 +1,13 @@
-"""End-to-end AI pipeline: JD in, output folder out (layout fixing comes later).
+"""End-to-end AI pipeline: JD in, output folder out.
 
     folder = run(jd_text)                                  # company/role as Claude read them
     folder = run(jd_text, company="Google", role="SRE")    # explicit names win
 
 Writes into output/<Company>_<Role>_<YYYY-MM-DD>[_N]/:
-    CV_<CANDIDATE_FILENAME>.pdf / .docx   rendered by cvgen.render.render() (LibreOffice)
+    CV_<CANDIDATE_FILENAME>.pdf / .docx   rendered by cvgen.render.render() (LibreOffice), after
+                                          cvgen.layout.fix_layout() fixed widows / page overflow
     cv.json                               exactly the dict that was rendered
-    cv.meta.json                          source ids, gaps, repairs, token usage, model
+    cv.meta.json                          source ids, gaps, repairs, layout rounds, token usage, model
     job_description.txt                   the JD exactly as given
 If validation still fails after the repair attempts, the folder gets cv.draft.json and
 cv.draft.meta.json instead of a CV, and run() raises PipelineError naming it.
@@ -19,8 +20,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from cvgen.layout import fix_layout
 from cvgen.output import candidate_filename, create_output_dir
-from cvgen.render import render
 from cvgen.tailor import TailorError, TailorValidationError, tailor
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -63,15 +64,18 @@ def run(jd: str, company: str | None = None, role: str | None = None, *, profile
     log.info("writing %s", folder)
     _write_jd(folder, jd)
 
+    # Render, check widows and page count, and let Claude fix them; the kept version is left rendered.
+    try:
+        cv, sources, layout_meta = fix_layout(result.cv, result.sources, profile, jd, folder,
+                                              f"CV_{candidate_filename()}", client=client)
+    except TailorError as exc:
+        raise PipelineError(f"{exc}. Is LibreOffice installed and not already running headless?") from exc
+
     meta = result.meta()
-    meta.update(company=final_company, role=final_role)
+    meta.update(company=final_company, role=final_role, sources=sources, layout=layout_meta)
     if (company and company != result.company) or (role and role != result.role):
         meta["extracted"] = {"company": result.company, "role": result.role}
+    _write_json(folder / "cv.json", cv)
     _write_json(folder / "cv.meta.json", meta)
-
-    _write_json(folder / "cv.json", result.cv)
-    docx_path, pdf_path = render(result.cv, folder, f"CV_{candidate_filename()}")
-    if not Path(pdf_path).is_file():  # render() doesn't check LibreOffice's exit code
-        raise PipelineError(f"PDF was not created: {pdf_path}. Is LibreOffice installed and not already running headless?")
-    log.info("done: %s", folder)
+    log.info("done: %s (%d page(s), %d widow(s))", folder, layout_meta["final_pages"], layout_meta["final_widows"])
     return folder

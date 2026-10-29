@@ -18,7 +18,9 @@ from cvgen.schema import CV, split_list
 
 # Pydantic error types already reported, with clearer wording, by the length checks below.
 _LENGTH_ERRORS = {"string_too_long", "too_long"}
-_NUMBER = re.compile(r"(?<![\w.])\d+(?:[.,]\d+)*(?!\w)")
+# A number not glued to a preceding letter ("p95", "k3s", "v3", "HS256" are names, not metrics);
+# units after it still count ("900ms", "25×", "1MB").
+_NUMBER = re.compile(r"(?<![\w.])\d+(?:[.,]\d+)*")
 _NUMBER_WORDS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7",
                  "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
 _FIRST_PERSON = re.compile(r"\b(?:I(?![/\w])|me|my|mine|myself|we|our|ours|us)\b")

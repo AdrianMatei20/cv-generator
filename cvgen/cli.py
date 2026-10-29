@@ -34,7 +34,36 @@ def main(argv=None) -> int:
         print(f"FAILED: {exc}", file=sys.stderr)
         return 1
     print(folder)
+    print_layout_report(folder)
     return 0
+
+
+def print_layout_report(folder: Path) -> None:
+    import json
+
+    meta = json.loads((folder / "cv.meta.json").read_text(encoding="utf-8"))
+    lay = meta.get("layout", {})
+    print("\nLayout")
+    for r in lay.get("rounds", []):
+        head = f"  round {r['round']}"
+        if r["round"] == 0:
+            print(f"{head}: {r['pages']} page(s), {len(r['widows'])} widow(s)"
+                  + (f", {len(r['unmapped'])} bullet(s) not found in PDF" if r.get("unmapped") else ""))
+        else:
+            rewritten = [c for c in r.get("changes", []) if "after" in c]
+            removed = [c for c in r.get("changes", []) if "removed" in c]
+            stats = f": {r['pages']} page(s), {len(r['widows'])} widow(s)" if "pages" in r else ""
+            print(f"{head}: {len(rewritten)} rewritten, {len(removed)} removed -> {r['result']}{stats}")
+        for w in r.get("widows", []):
+            print(f"      widow {w['path']}: last line \"{w['last_line']}\" ({w['last_line_words']} word(s))")
+        for c in r.get("changes", []):
+            if "after" in c:
+                print(f"      rewrote {c['path']}:\n        - {c['before']}\n        + {c['after']}")
+            elif "removed" in c:
+                print(f"      removed {c['path']}: {c['removed']}")
+        for e in r.get("validation_errors", []):
+            print(f"      rejected: {e}")
+    print(f"  kept round {lay.get('kept_round')}: final {lay.get('final_pages')} page(s), {lay.get('final_widows')} widow(s)")
 
 
 if __name__ == "__main__":

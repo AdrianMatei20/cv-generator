@@ -96,6 +96,13 @@ def test_invented_number(good, profile):
                       "use only numbers the profile gives"]
 
 
+def test_invented_number_with_unit(good, profile):
+    errors = errors_after(good, profile, lambda cv, m: cv["experience"][0]["bullets"].__setitem__(
+        0, "Cut p95 latency of the merchant API from 900ms to 150ms with Redis caching"))
+    assert errors == ["experience[0] (Acme Payments).bullets[0]: number(s) 150 not found in its source items; "
+                      "use only numbers the profile gives"]
+
+
 def test_number_words_in_source_count(good, profile):
     # exp-acme-05 says "two junior engineers"; writing 2 is not an invented number
     def change(cv, meta):

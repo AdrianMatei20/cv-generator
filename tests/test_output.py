@@ -5,9 +5,10 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
+import pymupdf
 import pytest
 
-from cvgen import pipeline
+from cvgen import layout, pipeline
 from cvgen.output import candidate_filename, create_output_dir, folder_name, sanitize_part
 from cvgen.tailor import MAX_REPAIRS
 
@@ -86,16 +87,21 @@ class FakeClient:
 
 @pytest.fixture
 def rendered(monkeypatch):
-    """Stub render(): record what it was given and write placeholder files."""
+    """Stub render(): record what it was given and write a one-page PDF, one line per item (no widows)."""
     calls = []
 
     def fake_render(cv, out_dir, basename, template=None):
         calls.append((json.loads(json.dumps(cv)), Path(out_dir), basename))
         docx, pdf = Path(out_dir) / f"{basename}.docx", Path(out_dir) / f"{basename}.pdf"
         docx.write_bytes(b"docx")
-        pdf.write_bytes(b"%PDF")
+        doc = pymupdf.open()
+        page = doc.new_page()
+        lines = [cv["summary"]] + [b for section in ("experience", "projects") for e in cv[section] for b in e["bullets"]]
+        for i, text in enumerate(lines):
+            page.insert_text((40, 60 + 14 * i), text, fontname="helv", fontsize=9)
+        doc.save(str(pdf))
         return docx, pdf
-    monkeypatch.setattr(pipeline, "render", fake_render)
+    monkeypatch.setattr(layout, "render", fake_render)
     monkeypatch.delenv("CANDIDATE_FILENAME", raising=False)
     return calls
 
@@ -116,6 +122,7 @@ def test_run_writes_the_output_folder(tmp_path, rendered):
     meta = json.loads((folder / "cv.meta.json").read_text(encoding="utf-8"))
     assert meta["model"] == "claude-opus-5-5" and meta["sources"]["experience"][0]["id"] == "exp-acme"
     assert meta["usage"]["output_tokens"] == 20 and "extracted" not in meta
+    assert meta["layout"]["final_pages"] == 1 and meta["layout"]["final_widows"] == 0 and meta["layout"]["rounds"][0]["round"] == 0
     assert (folder / "job_description.txt").read_bytes() == "Senior Backend Engineer at Acme.\r\nNode.js required.\n".encode()
 
 
@@ -133,7 +140,7 @@ def test_run_never_overwrites(tmp_path, rendered):
 
 
 def test_run_fails_when_pdf_missing(tmp_path, monkeypatch, rendered):
-    monkeypatch.setattr(pipeline, "render", lambda cv, out, base, template=None: (Path(out) / "x.docx", Path(out) / "x.pdf"))
+    monkeypatch.setattr(layout, "render", lambda cv, out, base, template=None: (Path(out) / "x.docx", Path(out) / "x.pdf"))
     with pytest.raises(pipeline.PipelineError, match="PDF was not created"):
         run_example(tmp_path)
 
