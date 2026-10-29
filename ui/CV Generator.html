@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CV Generator</title>
+<style>
+/* Design tokens and base styles follow QuizForge (web/src/styles.scss). */
+:root {
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f1f3f5;
+  --color-text: #1b1f24;
+  --color-text-muted: #545c66;
+  --color-border: #d6dae0;
+  --color-border-strong: #9aa3ad;
+  --color-link: #1d4ed8;
+  --color-accent: #1d4ed8;
+  --color-accent-hover: #1e40af;
+  --color-on-accent: #ffffff;
+  --color-success: #15703c;
+  --color-success-bg: #e7f5ec;
+  --color-warn: #8a4b00;
+  --color-warn-bg: #fff3e0;
+  --color-danger: #b42318;
+  --color-danger-bg: #fdecea;
+  --color-focus: #2563eb;
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.5rem; --space-6: 2rem;
+  --radius-sm: 4px; --radius: 8px;
+  color-scheme: light;
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: var(--color-bg); color: var(--color-text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 1rem; line-height: 1.5; }
+a { color: var(--color-link); }
+:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; }
+code { padding: 0.1rem 0.35rem; border-radius: var(--radius-sm); background: var(--color-surface-muted); font-size: 0.9em; }
+
+.app-header { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+.brand { font-size: 1.25rem; font-weight: 700; }
+.server-state { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); color: var(--color-text-muted); font-size: 0.875rem; }
+.dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--color-border-strong); }
+.dot.up { background: var(--color-success); }
+.dot.down { background: var(--color-danger); }
+.banner { padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-danger); background: var(--color-danger-bg); }
+.banner p { margin: 0 0 var(--space-1); }
+.banner p:last-child { margin: 0; }
+.app-main { max-width: 60rem; margin: 0 auto; padding: var(--space-5); }
+h1 { margin: 0 0 var(--space-2); }
+h2 { margin: var(--space-6) 0 var(--space-3); font-size: 1.25rem; }
+.lead { margin: 0 0 var(--space-5); color: var(--color-text-muted); }
+
+/* Form */
+.form { display: grid; gap: var(--space-4); padding: var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); }
+.field { display: grid; gap: var(--space-1); min-width: 0; margin: 0; padding: 0; border: 0; }
+label, legend { font-weight: 600; }
+.label-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.optional { color: var(--color-text-muted); font-weight: 400; }
+input[type='text'], textarea { width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font: inherit; }
+textarea { resize: vertical; min-height: 16rem; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+.options { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5); }
+.segmented { display: inline-flex; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); overflow: hidden; }
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented label { padding: var(--space-1) var(--space-3); font-weight: 600; cursor: pointer; background: var(--color-surface); }
+.segmented label + input + label { border-left: 1px solid var(--color-border-strong); }
+.segmented input:checked + label { background: var(--color-accent); color: var(--color-on-accent); }
+.segmented input:focus-visible + label { outline: 3px solid var(--color-focus); outline-offset: -3px; }
+.check { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 600; cursor: pointer; }
+.check input { width: 1.1rem; height: 1.1rem; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.hint { color: var(--color-text-muted); font-size: 0.875rem; }
+.counter { color: var(--color-text-muted); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+.form-error { margin: 0; color: var(--color-danger); }
+
+/* Buttons and badges */
+.button { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-surface);
+  color: var(--color-text); font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.button:hover:not(:disabled) { background: var(--color-surface-muted); }
+.button:disabled { cursor: not-allowed; opacity: 0.55; }
+.button.primary { border-color: var(--color-accent); background: var(--color-accent); color: var(--color-on-accent); }
+.button.primary:hover:not(:disabled) { background: var(--color-accent-hover); }
+.badge { display: inline-block; padding: 0.125rem var(--space-2); border-radius: 999px; border: 1px solid var(--color-border-strong);
+  font-size: 0.8125rem; font-weight: 600; white-space: nowrap; }
+.badge.have, .badge.done { border-color: var(--color-success); background: var(--color-success-bg); color: var(--color-success); }
+.badge.partial { border-color: var(--color-warn); background: var(--color-warn-bg); color: var(--color-warn); }
+.badge.missing, .badge.failed { border-color: var(--color-danger); background: var(--color-danger-bg); color: var(--color-danger); }
+.badge.running, .badge.queued { border-color: var(--color-accent); color: var(--color-accent); }
+.spinner { display: inline-block; width: 1em; height: 1em; border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+
+/* Jobs */
+.jobs { display: grid; gap: var(--space-4); }
+.empty { color: var(--color-text-muted); }
+.card { display: grid; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-border-strong); border-radius: var(--radius); background: var(--color-surface); }
+.card.running, .card.queued { border-left-color: var(--color-accent); }
+.card.done { border-left-color: var(--color-success); }
+.card.failed { border-left-color: var(--color-danger); }
+.card-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.card-title { margin: 0 var(--space-2) 0 0; font-size: 1.05rem; }
+.card-time { margin-left: auto; color: var(--color-text-muted); font-size: 0.875rem; }
+.steps { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: 0; padding: 0; list-style: none; font-size: 0.8125rem; }
+.steps li { padding: 0.1rem var(--space-2); border-radius: 999px; background: var(--color-surface-muted); color: var(--color-text-muted); }
+.steps li.past { color: var(--color-success); }
+.steps li.now { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.stage-line { display: flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--color-text-muted); }
+.error { margin: 0; padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-danger-bg); color: var(--color-danger); white-space: pre-wrap; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.facts { display: flex; flex-wrap: wrap; gap: var(--space-4); color: var(--color-text-muted); font-size: 0.875rem; }
+.fit { display: flex; align-items: baseline; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius);
+  background: var(--color-surface-muted); }
+.fit-score { font-size: 2rem; font-weight: 700; line-height: 1; }
+.fit-score.high { color: var(--color-success); }
+.fit-score.mid { color: var(--color-warn); }
+.fit-score.low { color: var(--color-danger); }
+.fit p { margin: 0; }
+details { border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
+summary { cursor: pointer; font-weight: 600; }
+h3 { margin: var(--space-4) 0 var(--space-2); font-size: 1rem; }
+.quick-wins { margin: 0; padding-left: 1.25rem; }
+.quick-wins li { margin-bottom: var(--space-1); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { padding: var(--space-2); border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
+th { color: var(--color-text-muted); font-weight: 600; }
+td.evidence { color: var(--color-text-muted); font-size: 0.8125rem; word-break: break-word; }
+.recs { display: grid; gap: var(--space-3); }
+.rec { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius); }
+.rec-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.rec-title { margin: 0; font-size: 1rem; }
+.rec-meta { display: flex; flex-wrap: wrap; gap: var(--space-3); color: var(--color-text-muted); font-size: 0.875rem; }
+.rec p { margin: 0; }
+.rec .label { font-weight: 600; }
+@media (max-width: 40rem) { .row { grid-template-columns: 1fr; } }
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <span class="brand">CV Generator</span>
+  <span class="server-state" aria-live="polite"><span class="dot" id="dot"></span><span id="server-text">Checking the server…</span></span>
+</header>
+
+<div class="banner" id="banner-down" role="alert" hidden>
+  <p><strong>The CV server isn't running.</strong> Start it with this command in a terminal: <code>cvgen serve</code></p>
+  <p>To have it start by itself at login, run <code>cvgen service install</code> once.</p>
+</div>
+<div class="banner" id="banner-token" role="alert" hidden>
+  <p><strong>This copy of the page can't use the server</strong> (it has no access key). Open the <em>CV Generator</em> file on your desktop, or <a id="served-link" href="#">the page the server hosts</a>.</p>
+</div>
+
+<main class="app-main">
+  <h1>New CV</h1>
+  <p class="lead">Paste a job description and press Generate. You can queue the next one while this one runs.</p>
+
+  <form class="form" id="form" novalidate>
+    <div class="field">
+      <div class="label-row"><label for="jd">Job description</label><span class="counter" id="counter">0 characters</span></div>
+      <textarea id="jd" name="jd" rows="14" required spellcheck="false" placeholder="Paste the whole job posting here"></textarea>
+    </div>
+    <div class="row">
+      <div class="field"><label for="company">Company <span class="optional">(optional)</span></label>
+        <input type="text" id="company" name="company" autocomplete="off" placeholder="Read from the JD if empty"></div>
+      <div class="field"><label for="role">Role <span class="optional">(optional)</span></label>
+        <input type="text" id="role" name="role" autocomplete="off" placeholder="Read from the JD if empty"></div>
+    </div>
+    <div class="options">
+      <fieldset class="field">
+        <legend class="visually-hidden">Page count</legend>
+        <span class="segmented" role="radiogroup" aria-label="Page count">
+          <input type="radio" name="pages" id="pages-1" value="1"><label for="pages-1">1 page</label>
+          <input type="radio" name="pages" id="pages-2" value="2" checked><label for="pages-2">2 pages</label>
+        </span>
+      </fieldset>
+      <label class="check"><input type="checkbox" id="gaps" checked> Include skill-gap report</label>
+    </div>
+    <p class="form-error" id="form-error" role="alert" hidden></p>
+    <div class="form-actions">
+      <button class="button primary" type="submit" id="generate">Generate</button>
+      <span class="hint">or press Ctrl+Enter</span>
+    </div>
+  </form>
+
+  <h2>Today's jobs</h2>
+  <div class="jobs" id="jobs" aria-live="polite"><p class="empty">No jobs yet today.</p></div>
+</main>
+
+<script>
+"use strict";
+// Filled in by the server (served page) or by `cvgen service install` (desktop copy). Never holds the API key.
+const CONFIG = /*CVGEN-CONFIG*/{"port": 8765, "token": ""}/*END-CVGEN-CONFIG*/;
+const BASE = location.protocol === "file:" ? `http://127.0.0.1:${CONFIG.port}` : location.origin;
+const STEPS = ["tailoring", "validating", "rendering", "layout", "gap report", "done"];
+const STAGE_TEXT = { queued: "Waiting for the previous job", starting: "Starting", tailoring: "Tailoring the CV with Claude",
+  validating: "Validating", rendering: "Rendering the PDF", "gap report": "Writing the skill-gap report" };
+
+const $ = (id) => document.getElementById(id);
+const cards = new Map();   // job id -> {el, status, detailed}
+let serverUp = null, tokenOk = true;
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") node.className = v; else if (k === "text") node.textContent = v; else node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) if (c != null && c !== false) node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return node;
+}
+
+async function api(path, options = {}) {
+  const headers = { "X-CVGen-Token": CONFIG.token, ...(options.body ? { "Content-Type": "application/json" } : {}) };
+  const res = await fetch(BASE + path, { ...options, headers });
+  if (res.status === 403) { tokenOk = false; updateBanners(); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || data.detail?.[0]?.msg || data.detail || `HTTP ${res.status}`);
+  tokenOk = true;
+  return data;
+}
+
+function updateBanners() {
+  $("banner-down").hidden = serverUp !== false;
+  $("banner-token").hidden = serverUp !== true || tokenOk;
+  $("served-link").href = `http://127.0.0.1:${CONFIG.port}/`;
+  $("dot").className = "dot " + (serverUp ? "up" : serverUp === false ? "down" : "");
+  $("server-text").textContent = serverUp ? "Server running" : serverUp === false ? "Server not running" : "Checking the server…";
+  $("generate").disabled = !serverUp || !tokenOk;
+}
+
+async function checkHealth() {
+  try { const r = await fetch(BASE + "/api/health", { cache: "no-store" }); serverUp = r.ok; }
+  catch { serverUp = false; }
+  updateBanners();
+}
+
+// ---------------------------------------------------------------- form
+$("jd").addEventListener("input", () => { $("counter").textContent = `${$("jd").value.length.toLocaleString()} characters`; });
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); $("form").requestSubmit(); }
+});
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const jd = $("jd").value.trim();
+  const err = $("form-error");
+  err.hidden = true;
+  if (!jd) { err.textContent = "Paste a job description first."; err.hidden = false; $("jd").focus(); return; }
+  $("generate").disabled = true;
+  try {
+    const body = { jd, company: $("company").value.trim() || null, role: $("role").value.trim() || null,
+      pages: Number(document.querySelector("input[name=pages]:checked").value), gaps: $("gaps").checked };
+    await api("/api/jobs", { method: "POST", body: JSON.stringify(body) });
+    $("jd").value = ""; $("company").value = ""; $("role").value = ""; $("counter").textContent = "0 characters";
+    $("jd").focus();
+    poll();
+  } catch (ex) { err.textContent = `Couldn't start the job: ${ex.message}`; err.hidden = false; }
+  finally { updateBanners(); }
+});
+
+// ---------------------------------------------------------------- jobs
+function elapsed(job) {
+  const start = new Date(job.started || job.created), end = job.finished ? new Date(job.finished) : new Date();
+  const s = Math.max(0, Math.round((end - start) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function stepIndex(stage) {
+  if (stage.startsWith("layout")) return 3;
+  const i = STEPS.indexOf(stage);
+  return i < 0 ? -1 : i;
+}
+
+function stageText(job) {
+  if (job.stage.startsWith("layout round")) return `Fixing the layout (${job.stage.replace("layout ", "")})`;
+  return STAGE_TEXT[job.stage] || job.stage;
+}
+
+function title(job) {
+  const s = job.summary || {};
+  const company = s.company || job.company, role = s.role || job.role;
+  return company && role ? `${role} · ${company}` : job.title;
+}
+
+function renderCard(job) {
+  const entry = cards.get(job.id);
+  const card = el("article", { class: `card ${job.status}`, "aria-label": title(job) });
+  const header = el("div", { class: "card-header" },
+    el("h3", { class: "card-title", text: title(job) }),
+    el("span", { class: `badge ${job.status}`, text: job.status }),
+    el("span", { class: "card-time", text: `${new Date(job.created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${elapsed(job)}` }));
+  card.append(header);
+
+  if (job.status === "queued" || job.status === "running") {
+    const now = stepIndex(job.stage);
+    const steps = el("ol", { class: "steps", "aria-label": "Progress" },
+      STEPS.filter((s) => s !== "gap report" || job.gaps).map((s) => {
+        const i = STEPS.indexOf(s);
+        return el("li", { class: i < now ? "past" : i === now ? "now" : null, "aria-current": i === now ? "step" : null, text: s });
+      }));
+    card.append(steps, el("p", { class: "stage-line" }, el("span", { class: "spinner", "aria-hidden": "true" }), stageText(job)));
+  } else if (job.status === "failed") {
+    card.append(el("p", { class: "error", text: job.error || "Failed." }));
+  } else if (job.status === "done") {
+    card.append(el("p", { class: "stage-line", text: "Loading results…" }));
+  }
+  if (entry) entry.el.replaceWith(card);
+  cards.set(job.id, { el: card, status: job.status, detailed: false });
+  return card;
+}
+
+function badge(status) { return el("span", { class: `badge ${status}`, text: status }); }
+
+function renderDone(job, data) {
+  const card = el("article", { class: "card done", "aria-label": title(job) });
+  const s = job.summary || {};
+  card.append(el("div", { class: "card-header" },
+    el("h3", { class: "card-title", text: title(job) }), badge("done"),
+    el("span", { class: "card-time", text: `${new Date(job.created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${elapsed(job)}` })));
+
+  const actions = el("div", { class: "actions" });
+  if (data.pdf) actions.append(el("a", { class: "button primary", href: BASE + data.pdf, target: "_blank", rel: "noopener", text: "Open PDF" }));
+  if (data.docx) actions.append(el("a", { class: "button", href: BASE + data.docx, target: "_blank", rel: "noopener", text: "Word file" }));
+  if (data.anon_pdf) actions.append(el("a", { class: "button", href: BASE + data.anon_pdf, target: "_blank", rel: "noopener",
+    title: "Name, contact details, companies and universities replaced", text: "Anonymized PDF" }));
+  const open = el("button", { class: "button", type: "button", text: "Open folder" });
+  open.addEventListener("click", async () => {
+    open.disabled = true;
+    try { await api(`/api/jobs/${job.id}/open-folder`, { method: "POST", body: "{}" }); }
+    catch (ex) { alert(`Couldn't open the folder: ${ex.message}`); }
+    finally { open.disabled = false; }
+  });
+  actions.append(open);
+  card.append(actions);
+  const facts = [`Folder: ${data.folder}`];
+  if (data.layout?.final_pages) facts.push(`${data.layout.final_pages} page(s)`);
+  if (data.layout?.final_widows != null) facts.push(`${data.layout.final_widows} widow(s)`);
+  if (s.cost_usd != null) facts.push(`≈ $${s.cost_usd.toFixed(2)}`);
+  card.append(el("div", { class: "facts" }, facts.map((f) => el("span", { text: f }))));
+  if (s.gap_error) card.append(el("p", { class: "error", text: `Skill-gap report failed: ${s.gap_error}` }));
+  if (data.gap_report) card.append(renderGapReport(data.gap_report));
+  return card;
+}
+
+function renderGapReport(r) {
+  const wrap = el("div", { class: "gap-report" });
+  const score = r.fit.score;
+  wrap.append(el("div", { class: "fit" },
+    el("span", { class: `fit-score ${score >= 75 ? "high" : score >= 50 ? "mid" : "low"}`, text: `${score}` }),
+    el("div", {}, el("p", {}, el("strong", { text: `Fit ${score}/100. ` }), r.fit.justification), el("p", { class: "hint", text: r.fit.summary }))));
+
+  if (r.quick_wins?.length) {
+    wrap.append(el("h3", { text: "Quick wins this week" }), el("ol", { class: "quick-wins" }, r.quick_wins.map((w) => el("li", { text: w }))));
+  }
+
+  const order = { missing: 0, partial: 1, have: 2 };
+  const reqs = [...r.requirements].sort((a, b) => (a.importance !== b.importance ? (a.importance === "must-have" ? -1 : 1) : order[a.status] - order[b.status]));
+  const counts = { have: 0, partial: 0, missing: 0 };
+  r.requirements.forEach((q) => counts[q.status]++);
+  const table = el("table", {},
+    el("thead", {}, el("tr", {}, ["Requirement", "Importance", "Status", "Evidence"].map((h) => el("th", { scope: "col", text: h })))),
+    el("tbody", {}, reqs.map((q) => el("tr", {},
+      el("td", {}, el("div", { text: q.name }), el("div", { class: "hint", text: q.note })),
+      el("td", { text: q.importance }), el("td", {}, badge(q.status)),
+      el("td", { class: "evidence", text: q.evidence.join(", ") || "–" })))));
+  wrap.append(el("details", {}, el("summary", { text: `Requirements: ${counts.have} have, ${counts.partial} partial, ${counts.missing} missing` }),
+    el("div", { class: "table-wrap" }, table)));
+
+  const byId = Object.fromEntries(r.requirements.map((q) => [q.id, q]));
+  const recs = el("div", { class: "recs" }, r.recommendations.map((rec, i) => {
+    const link = rec.url ? el("a", { href: rec.url, target: "_blank", rel: "noopener noreferrer", text: "Open" })
+                         : el("a", { href: rec.search_url, target: "_blank", rel: "noopener noreferrer", text: "Search" });
+    const card = el("div", { class: "rec" },
+      el("div", { class: "rec-head" }, el("span", { class: "badge", text: rec.type }), el("h4", { class: "rec-title", text: `${i + 1}. ${rec.title}` })),
+      el("div", { class: "rec-meta" }, el("span", { text: rec.provider }), el("span", { text: `~${rec.effort_hours} h` }), el("span", { text: rec.cost }), link),
+      el("p", { text: rec.why }),
+      el("p", { class: "hint", text: "Closes: " + rec.requirement_ids.map((id) => byId[id]?.name || id).join(", ") }));
+    if (rec.project_idea) card.append(el("p", {}, el("span", { class: "label", text: "Build: " }), rec.project_idea));
+    if (rec.github) card.append(el("p", {}, el("span", { class: "label", text: "On GitHub: " }), rec.github));
+    return card;
+  }));
+  wrap.append(el("details", { open: true }, el("summary", { text: `Recommendations (${r.recommendations.length}), biggest impact first` }), recs));
+  return wrap;
+}
+
+async function loadDetails(job) {
+  const entry = cards.get(job.id);
+  entry.detailed = true;
+  try {
+    const data = await api(`/api/jobs/${job.id}`);
+    const card = renderDone(job, data);
+    entry.el.replaceWith(card);
+    entry.el = card;
+  } catch (ex) { entry.detailed = false; }
+}
+
+async function poll() {
+  if (!serverUp) return;
+  let jobs;
+  try { jobs = (await api("/api/jobs")).jobs; } catch { if (tokenOk) { await checkHealth(); } return; }
+  const list = $("jobs");
+  if (!jobs.length) { if (!list.querySelector(".empty")) list.replaceChildren(el("p", { class: "empty", text: "No jobs yet today." })); return; }
+  list.querySelector(".empty")?.remove();
+  jobs.forEach((job, i) => {
+    let entry = cards.get(job.id);
+    if (!entry || job.status !== "done" || entry.status !== "done") {
+      if (!entry || !entry.detailed) renderCard(job);
+      entry = cards.get(job.id);
+    }
+    if (job.status === "done" && !entry.detailed) loadDetails(job);
+    if (list.children[i] !== entry.el) list.insertBefore(entry.el, list.children[i] || null);
+  });
+}
+
+(async function start() {
+  updateBanners();
+  await checkHealth();
+  await poll();
+  setInterval(poll, 1000);
+  setInterval(checkHealth, 5000);
+})();
+</script>
+</body>
+</html>

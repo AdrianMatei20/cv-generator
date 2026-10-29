@@ -208,3 +208,6 @@ __marimo__/
 
 # Output folder
 output/
+# Local CV server: access token and logs
+.cvgen_token
+logs/

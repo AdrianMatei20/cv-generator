@@ -190,7 +190,9 @@ def test_rerender_overwrites_in_place(monkeypatch, tmp_path, capsys):
 
     assert cli.main(["rerender", str(folder), "--profile", str(EXAMPLE)]) == 0
     out = capsys.readouterr().out
-    assert rendered == [(edited, "CV_AdrianMatei")]  # same file name, overwritten in place
+    assert rendered[0] == (edited, "CV_AdrianMatei")  # same file name, overwritten in place
+    assert rendered[1][1] == "CV_JohnDoe" and rendered[1][0]["name"] == "John Doe"  # anonymized copy refreshed too
+    assert rendered[1][0]["experience"][0]["bullets"] == edited["experience"][0]["bullets"]
     assert (folder / "CV_AdrianMatei.pdf").read_bytes().startswith(b"%PDF")
     assert "1 validation issue(s) (rendered anyway)" in out and "450" in out
     assert "1 page(s), 0 widow(s)" in out

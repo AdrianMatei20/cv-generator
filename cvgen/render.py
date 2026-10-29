@@ -19,6 +19,10 @@ DEFAULT_TEMPLATE = REPO_ROOT / "templates" / "cv_template_with_summary.docx"
 
 LIBREOFFICE_FALLBACK = r"C:\Program Files\LibreOffice\program\soffice.exe"
 
+# creationflags for the LibreOffice subprocess. 0 (the default) behaves exactly as before;
+# the background server sets CREATE_NO_WINDOW on Windows so no console window flashes.
+SUBPROCESS_FLAGS = 0
+
 # ---------------------------
 # ESCAPE SPECIAL CHARACTERS
 # ---------------------------
@@ -132,7 +136,7 @@ def convert_to_pdf(docx_path, output_dir):
         "--convert-to", "pdf",
         str(docx_path),
         "--outdir", str(output_dir)
-    ])
+    ], creationflags=SUBPROCESS_FLAGS)
 
 # ---------------------------
 # RENDER

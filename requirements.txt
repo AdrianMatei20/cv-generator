@@ -7,5 +7,9 @@ pydantic>=2
 pymupdf
 python-dotenv
 
+# Local server for the browser page (cvgen serve / cvgen service install)
+fastapi>=0.110
+uvicorn>=0.29
+
 # Tests
 pytest

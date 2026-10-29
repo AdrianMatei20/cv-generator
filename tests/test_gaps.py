@@ -237,6 +237,7 @@ def test_pipeline_writes_gap_report_and_backlog(profile, tmp_path, monkeypatch):
         doc.save(str(Path(out_dir) / f"{basename}.pdf"))
         return Path(out_dir) / f"{basename}.docx", Path(out_dir) / f"{basename}.pdf"
     monkeypatch.setattr(layout, "render", fake_render)
+    monkeypatch.setattr(pipeline, "render", fake_render)
 
     folder = pipeline.run("Full-stack JD: Node.js, React, AWS", profile_path=EXAMPLE, output_root=tmp_path, client=client)
     assert {"gap_report.json", "gap_report.md"} <= {p.name for p in folder.iterdir()}

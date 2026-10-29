@@ -102,6 +102,7 @@ def rendered(monkeypatch):
         doc.save(str(pdf))
         return docx, pdf
     monkeypatch.setattr(layout, "render", fake_render)
+    monkeypatch.setattr(pipeline, "render", fake_render)  # the anonymized copy
     monkeypatch.delenv("CANDIDATE_FILENAME", raising=False)
     return calls
 
@@ -115,10 +116,17 @@ def test_run_writes_the_output_folder(tmp_path, rendered):
     folder = run_example(tmp_path)
     assert folder == tmp_path / "AcmePayments_SeniorBackendEngineer_2026-10-26"
     assert sorted(p.name for p in folder.iterdir()) == [
-        "CV_AdrianMatei.docx", "CV_AdrianMatei.pdf", "cv.json", "cv.meta.json", "job_description.txt"]
+        "CV_AdrianMatei.docx", "CV_AdrianMatei.pdf", "CV_JohnDoe.docx", "CV_JohnDoe.pdf",
+        "cv.json", "cv.meta.json", "job_description.txt"]
     cv = json.loads((folder / "cv.json").read_text(encoding="utf-8"))
     assert cv == rendered[0][0]  # cv.json is exactly what was rendered
     assert rendered[0][1:] == (folder, "CV_AdrianMatei")
+    anon, anon_folder, anon_name = rendered[-1]  # the final CV, anonymized like generate.py does
+    assert (anon_folder, anon_name) == (folder, "CV_JohnDoe")
+    assert anon["name"] == "John Doe" and anon["email"] == "email@example.com" and anon["phone"] == "0000000000"
+    assert {j["company"] for j in anon["experience"]} == {"Company Name"}
+    assert [j["bullets"] for j in anon["experience"]] == [j["bullets"] for j in cv["experience"]]
+    assert "jane" not in json.dumps(anon).lower()
     meta = json.loads((folder / "cv.meta.json").read_text(encoding="utf-8"))
     assert meta["model"] == "claude-opus-5-5" and meta["sources"]["experience"][0]["id"] == "exp-acme"
     assert meta["usage"]["output_tokens"] == 20 and "extracted" not in meta

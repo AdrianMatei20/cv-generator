@@ -15,6 +15,21 @@ Generates a CV as `.docx` and `.pdf` from a Word template, in two ways:
 4. **API key** (tailored flow only): copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`. Optional settings there: `CV_MODEL` (default `claude-opus-5-5`), `CV_EFFORT` (default `high`), `CANDIDATE_FILENAME` (default `AdrianMatei`, giving `CV_AdrianMatei.pdf`).
 5. **Profile** (tailored flow only): `profile.json` holds everything about you; `profile.example.json` shows the format. Check it with `cvgen profile check`.
 
+## Browser page (no commands)
+
+Run this once:
+
+```
+cvgen service install
+```
+
+It registers a small local server to start hidden whenever you log in (Windows: a Startup-folder shortcut running `pythonw`; macOS: a LaunchAgent; Linux: a systemd user service), starts it now, and puts **CV Generator.html** on your desktop. From then on: double-click that file, paste a job description, press **Generate** (or Ctrl+Enter). You can queue the next JD while one runs. Each finished job shows Open PDF / Word file / Open folder, the fit score, quick wins, the requirements table and the recommendations. The same page is at http://127.0.0.1:8765/ if you prefer a bookmark.
+
+- The server listens on 127.0.0.1 only (port `CVGEN_PORT`, default 8765), reads `ANTHROPIC_API_KEY` from `.env`, and logs to `logs/server.log`. The API key never reaches the page.
+- Only the desktop page and the page at http://127.0.0.1:8765/ can use it: requests must come from those origins and carry a local access token (in `.cvgen_token`, written into both pages automatically).
+- If the page says the server isn't running, start it in a terminal with `cvgen serve`.
+- `cvgen service status` shows whether it's registered and running; `cvgen service uninstall` removes the autostart, stops the server and deletes the desktop copy.
+
 ## Manual flow (unchanged, no AI)
 
 Write or edit a CV JSON in `data/`, then:
@@ -56,6 +71,7 @@ Each run writes a new folder, `output/<Company>_<Role>_<YYYY-MM-DD>/` (with `_2`
 | File | What it is |
 |---|---|
 | `CV_AdrianMatei.pdf`, `CV_AdrianMatei.docx` | the CV |
+| `CV_JohnDoe.pdf`, `CV_JohnDoe.docx` | the same CV anonymized, as `generate.py` does it (name, contact details, links, companies and universities replaced) |
 | `cv.json` | exactly what was rendered; edit it and run `cvgen rerender` to re-render in place |
 | `cv.meta.json` | profile ids behind every line, gaps, repairs, layout rounds, token usage, cost, model |
 | `gap_report.md`, `gap_report.json` | fit score, requirements table, recommendations by gap, quick wins |

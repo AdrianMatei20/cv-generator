@@ -32,7 +32,7 @@ from cvgen.gaps import gap_report, update_backlog, write_gap_report
 from cvgen.layout import LayoutReport, check_layout, fix_layout
 from cvgen.output import candidate_filename, create_output_dir
 from cvgen.profile import check_profile
-from cvgen.render import get_soffice_path, render
+from cvgen.render import anonymize, get_soffice_path, render
 from cvgen.tailor import TailorError, TailorValidationError, tailor
 from cvgen.validate import validate
 
@@ -40,6 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PROFILE = REPO_ROOT / "profile.json"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output"
 MAX_RETRIES = 6
+ANON_BASENAME = "CV_JohnDoe"  # same name and anonymize() as the legacy generate.py
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +97,17 @@ def load_profile_checked(path: Path) -> dict:
     return profile
 
 
+def render_anonymized(cv: dict, folder: Path) -> Path | None:
+    """Render CV_JohnDoe.docx/.pdf next to the real CV, exactly as generate.py does: name, contact
+    details, links, company and university names replaced. Returns the PDF, or None if LibreOffice
+    didn't produce one (logged; the real CV is already done)."""
+    _, pdf = render(anonymize(cv), folder, ANON_BASENAME)
+    if not Path(pdf).is_file():
+        log.warning("anonymized PDF was not created: %s", pdf)
+        return None
+    return Path(pdf)
+
+
 def make_client() -> anthropic.Anthropic:
     # The SDK retries rate limits (429), overloaded (529), 5xx and connection errors with
     # exponential backoff, honouring retry-after; give it more attempts than the default 2.
@@ -150,6 +162,9 @@ def run(jd: str, company: str | None = None, role: str | None = None, *, pages: 
         except TailorError as exc:
             raise PipelineError(f"{exc}. Is LibreOffice installed and not already running headless?") from exc
         pages_limit = limits.MAX_PAGES
+
+    progress("Rendering the anonymized CV")
+    render_anonymized(cv, folder)
 
     gap_meta = None
     if gaps:
@@ -211,7 +226,7 @@ def rerender(folder: Path, *, profile_path: Path = DEFAULT_PROFILE, progress=Non
 
     progress("Validating")
     errors = validate(cv, meta, profile)
-    existing = sorted(p.stem for p in folder.glob("CV_*.pdf"))
+    existing = sorted(p.stem for p in folder.glob("CV_*.pdf") if p.stem != ANON_BASENAME)
     basename = existing[0] if existing else f"CV_{candidate_filename()}"
     progress("Rendering (LibreOffice)")
     _, pdf = render(cv, folder, basename)
@@ -219,6 +234,8 @@ def rerender(folder: Path, *, profile_path: Path = DEFAULT_PROFILE, progress=Non
         raise PipelineError(f"PDF was not created: {pdf}. Is LibreOffice already running headless?")
     report = check_layout(pdf, cv)
     progress(f"Layout check: {report.pages} page(s), {len(report.widows)} widow(s)")
+    progress("Rendering the anonymized CV")
+    render_anonymized(cv, folder)
     meta.setdefault("rerenders", []).append({
         "date": date.today().isoformat(), **report.summary(), "validation_errors": errors})
     _write_json(meta_path, meta)

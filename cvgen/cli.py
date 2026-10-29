@@ -17,11 +17,11 @@ from pathlib import Path
 import anthropic
 
 from cvgen import cost
-from cvgen.pipeline import (DEFAULT_OUTPUT_ROOT, DEFAULT_PROFILE, MAX_RETRIES, PipelineError, SetupError, check_api_key,
+from cvgen.pipeline import (ANON_BASENAME, DEFAULT_OUTPUT_ROOT, DEFAULT_PROFILE, MAX_RETRIES, PipelineError, SetupError, check_api_key,
                             check_libreoffice, load_profile_checked, rerender, run)
 from cvgen.tailor import TailorError
 
-COMMANDS = {"new", "batch", "rerender", "profile", "-h", "--help"}
+COMMANDS = {"new", "batch", "rerender", "profile", "serve", "service", "-h", "--help"}
 
 
 # ---------------------------
@@ -68,8 +68,8 @@ def _meta(folder: Path) -> dict:
     return json.loads((folder / "cv.meta.json").read_text(encoding="utf-8"))
 
 
-def _pdf(folder: Path) -> Path | None:
-    return next(iter(sorted(folder.glob("CV_*.pdf"))), None)
+def _pdf(folder: Path, anonymized: bool = False) -> Path | None:
+    return next((p for p in sorted(folder.glob("CV_*.pdf")) if (p.stem == ANON_BASENAME) == anonymized), None)
 
 
 def print_layout_report(folder: Path) -> None:
@@ -122,6 +122,8 @@ def print_result(folder: Path) -> None:
     print(f"Estimated cost: {cost.fmt(meta.get('cost_usd'))} ({meta.get('model')})")
     print(f"\nFolder: {folder}")
     print(f"PDF:    {_pdf(folder)}")
+    if _pdf(folder, anonymized=True):
+        print(f"        {_pdf(folder, anonymized=True)} (anonymized)")
     if (folder / "gap_report.md").is_file():
         print(f"Gaps:   {folder / 'gap_report.md'}")
         print(f"        {DEFAULT_OUTPUT_ROOT / 'skills_backlog.md'}")
@@ -221,6 +223,19 @@ def cmd_rerender(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    from cvgen.server import main as serve
+    return serve(["--port", str(args.port)] if args.port else [])
+
+
+def cmd_service(args) -> int:
+    from cvgen import service
+    lines = {"install": service.install, "uninstall": service.uninstall, "status": service.status}[args.action]()
+    for line in lines:
+        print(line)
+    return 0
+
+
 def cmd_profile(args) -> int:
     from cvgen.profile import _check_command
     return _check_command(Path(args.path))
@@ -257,6 +272,14 @@ def build_parser() -> argparse.ArgumentParser:
     rer.add_argument("folder")
     rer.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
     rer.set_defaults(func=cmd_rerender)
+
+    serve = sub.add_parser("serve", help="run the local server for the CV Generator page (foreground)")
+    serve.add_argument("--port", type=int, help="default: CVGEN_PORT or 8765")
+    serve.set_defaults(func=cmd_serve)
+
+    svc = sub.add_parser("service", help="start the server hidden at login (install/uninstall/status)")
+    svc.add_argument("action", choices=("install", "uninstall", "status"))
+    svc.set_defaults(func=cmd_service)
 
     prof = sub.add_parser("profile", help="profile.json tools")
     prof_sub = prof.add_subparsers(dest="profile_command", required=True)
