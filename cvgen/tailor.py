@@ -39,6 +39,9 @@ DEFAULT_EFFORT = "high"
 TOOL_NAME = "submit_cv"
 MAX_TOKENS = 32000
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+TOOL_CHANGES_BETA = "mid-conversation-tool-changes-2026-07-01"
+# Same betas on every profile call (tailor, gap report), so they share one cache prefix.
+BETAS = [FALLBACK_BETA, TOOL_CHANGES_BETA]
 MAX_REPAIRS = 2
 
 log = logging.getLogger(__name__)
@@ -125,26 +128,38 @@ TOOL = {
 # ---------------------------
 # PROMPT
 # ---------------------------
-def system_prompt() -> str:
-    """Built per request from cvgen.limits, so a runtime override (e.g. --pages) applies."""
-    return f"""\
-You tailor a candidate's CV to a job description (JD). The candidate's master profile is in <profile> below; it is the only source of facts about them. The JD arrives in the user message. Submit the result by calling the {TOOL_NAME} tool exactly once; don't answer in plain text.
+# Shared by every call that works from the profile (tailoring, gap report). It goes before
+# the profile, so it's part of the cached prefix: keep it free of per-run or per-task text.
+SHARED_PROMPT = """\
+You work for a job candidate. Their master profile is in <profile> below; it is the only source of facts about them. Each request brings a job description (JD) in the user message, and the task to do with it comes after the profile.
 
 How the profile works
 - Every item has an id. Jobs and projects hold bullets. A bullet's `text` is its base wording, and its optional `facts` are extra details (numbers, technologies, scope) taken from other wordings of the same achievement. You may use a bullet's text and its facts, and nothing else.
 - `angles` say what a bullet demonstrates; use them to judge relevance.
-- A project may have `compact_bullets`, a shorter alternative to its `bullets` where one bullet can summarise several. Use one set or the other for a project, never both.
-- `headlines` and `summaries` are variants labelled with a `target_role`. Start from the closest one and adapt it to the JD.
+- A project may have `compact_bullets`, a shorter alternative to its `bullets` where one bullet can summarise several.
+- `headlines` and `summaries` are variants labelled with a `target_role`.
 - Jobs with `positions` (e.g. internships) are shown as one entry; a bullet's `position` says which position it belongs to.
 - `preferences` is written by the candidate. Let `target_roles` and `tone` guide your choices, and never write anything listed in `never_claim`. Preferences are not facts.
+
+Never invent
+- Never claim or imply any skill, tool, technology, employer, job title, date, duration, number, metric or certificate that the profile doesn't support. Don't round, inflate or combine numbers into new ones.
+"""
+
+
+def system_prompt() -> str:
+    """The tailoring task, after the cached profile. Built per request from cvgen.limits, so a
+    runtime override (e.g. --pages) applies without touching the cached prefix."""
+    return f"""\
+Task: tailor the candidate's CV to the JD. Submit the result by calling the {TOOL_NAME} tool exactly once; don't answer in plain text.
 
 Choosing content
 - Pick the experience, projects and skills most relevant to this JD; shorten or drop the rest. Keep every job so the work history has no gaps, but give older or unrelated jobs just one or two bullets.
 - Order bullets within each job and project by relevance to the JD, most relevant first. Choose the projects that best support the JD.
+- For a project with `compact_bullets`, use either its `bullets` or its `compact_bullets`, never both.
+- Start the headline and summary from the closest `target_role` variant and adapt them to the JD.
 - Use the JD's own words for skills, technologies and activities wherever they are true for the candidate. For example, if the JD says "root cause analysis" and a bullet describes tracing a production issue to its cause, you may call it root cause analysis. Never use a JD term to claim something the profile doesn't support.
 
-Never invent
-- Don't add any skill, tool, technology, employer, job title, date, duration, number, metric or certificate that isn't in the profile. Don't round, inflate or combine numbers into new ones.
+Sources
 - If the JD asks for something the profile lacks, leave it out of the CV and list it in `gaps`.
 - Job titles, companies, dates, locations, education and certificate details are filled in from the profile by id. You only choose which appear and in what order.
 - Every piece of text you write lists the ids of the profile items it came from in `source_ids`. A bullet built from two profile bullets lists both; a skills line lists the ids of its skills.
@@ -176,23 +191,44 @@ def profile_block(profile: dict) -> str:
     return "<profile>\n" + json.dumps(_strip_sources(profile), ensure_ascii=False, indent=1) + "\n</profile>"
 
 
+def web_search_enabled() -> bool:
+    return os.environ.get("GAP_WEB_SEARCH", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def shared_tools() -> list[dict]:
+    """The tool list every profile call sends, byte-identical, so they share one cache prefix.
+
+    submit_cv is live; submit_gap_report and web_search are declared deferred and only
+    surfaced (with tool_addition) by the gap-report call.
+    """
+    from cvgen.gaps import GAP_TOOL, WEB_SEARCH_TOOL  # deferred import: cvgen.gaps imports this module
+
+    return [TOOL, GAP_TOOL] + ([WEB_SEARCH_TOOL] if web_search_enabled() else [])
+
+
+def shared_system(profile: dict, task_prompt: str) -> list[dict]:
+    """Shared rules + profile (cached), then the task (not cached)."""
+    return [
+        {"type": "text", "text": SHARED_PROMPT},
+        {"type": "text", "text": profile_block(profile), "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": task_prompt},
+    ]
+
+
 def build_request(profile: dict, jd: str, model: str, effort: str) -> dict:
-    """Request kwargs. Everything before the JD is byte-stable across runs, so it caches."""
+    """Request kwargs. Tools, shared rules and profile are byte-stable across runs and tasks, so they cache."""
     return {
         "model": model,
         "max_tokens": MAX_TOKENS,
-        "betas": [FALLBACK_BETA],
+        "betas": BETAS,
         "fallbacks": "default",
         "thinking": {"type": "adaptive"},
         "output_config": {"effort": effort},
-        "tools": [TOOL],
+        "tools": shared_tools(),
         # Opus 5.5 rejects a forced tool_choice; strict + the prompt make the call reliable,
         # and tailor() checks it happened.
         "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
-        "system": [
-            {"type": "text", "text": system_prompt()},
-            {"type": "text", "text": profile_block(profile), "cache_control": {"type": "ephemeral"}},
-        ],
+        "system": shared_system(profile, system_prompt()),
         "messages": [{
             "role": "user",
             "content": f"<job_description>\n{jd.strip()}\n</job_description>\n\nTailor the CV to this job and submit it with {TOOL_NAME}.",

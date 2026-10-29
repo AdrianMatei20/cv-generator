@@ -25,7 +25,10 @@ import anthropic
 from dotenv import load_dotenv
 
 from cvgen import limits
+from pydantic import ValidationError
+
 from cvgen.cost import run_cost
+from cvgen.gaps import gap_report, update_backlog, write_gap_report
 from cvgen.layout import LayoutReport, check_layout, fix_layout
 from cvgen.output import candidate_filename, create_output_dir
 from cvgen.profile import check_profile
@@ -103,12 +106,14 @@ def make_client() -> anthropic.Anthropic:
 # RUN
 # ---------------------------
 def run(jd: str, company: str | None = None, role: str | None = None, *, pages: int | None = None,
-        layout_fix: bool = True, model: str | None = None, progress=None, profile_path: Path = DEFAULT_PROFILE,
-        output_root: Path = DEFAULT_OUTPUT_ROOT, client=None, today: date | None = None) -> Path:
-    """Tailor, validate, render and fix the layout; return the output folder.
+        layout_fix: bool = True, gaps: bool = True, model: str | None = None, progress=None,
+        profile_path: Path = DEFAULT_PROFILE, output_root: Path = DEFAULT_OUTPUT_ROOT, client=None,
+        today: date | None = None) -> Path:
+    """Tailor, validate, render, fix the layout and write the gap report; return the output folder.
 
     `pages` overrides limits.MAX_PAGES for this run; `layout_fix=False` renders and checks
-    the layout without asking Claude to fix it; `progress` gets a message per stage.
+    the layout without asking Claude to fix it; `gaps=False` skips the skill-gap report;
+    `progress` gets a message per stage. A failed gap report is recorded, not fatal.
     """
     progress = progress or (lambda message: None)
     load_dotenv(REPO_ROOT / ".env")
@@ -146,9 +151,24 @@ def run(jd: str, company: str | None = None, role: str | None = None, *, pages: 
             raise PipelineError(f"{exc}. Is LibreOffice installed and not already running headless?") from exc
         pages_limit = limits.MAX_PAGES
 
+    gap_meta = None
+    if gaps:
+        try:
+            gap = gap_report(profile, jd, client=client, model=model, progress=progress)
+            write_gap_report(folder, gap, final_company, final_role)
+            update_backlog(output_root)
+            gap_meta = {"fit": gap.report["fit"]["score"], "repairs": len(gap.repairs), "web_search": gap.web_search,
+                        "usage": gap.usage}
+        except (TailorError, anthropic.APIError, ValidationError) as exc:  # the CV is done; keep it
+            log.warning("gap report failed: %s", exc)
+            progress(f"Gap report failed: {str(exc).splitlines()[0]}")
+            gap_meta = {"error": str(exc)}
+
     meta = result.meta()
     meta.update(company=final_company, role=final_role, sources=sources, layout=layout_meta,
-                settings={"pages": pages_limit, "layout_fix": layout_fix})
+                settings={"pages": pages_limit, "layout_fix": layout_fix, "gaps": gaps})
+    if gap_meta is not None:
+        meta["gap_report"] = gap_meta
     if (company and company != result.company) or (role and role != result.role):
         meta["extracted"] = {"company": result.company, "role": result.role}
     meta["cost_usd"] = run_cost(meta)

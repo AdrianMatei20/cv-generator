@@ -104,13 +104,27 @@ def print_result(folder: Path) -> None:
         print("\nGaps (JD asks for it, profile has no evidence; left out):")
         for gap in meta["gaps"]:
             print(f"  - {gap}")
-    u, lu = meta.get("usage", {}), meta.get("layout", {}).get("usage", {})
+    gap = meta.get("gap_report")
+    if gap and "error" in gap:
+        print(f"\nGap report failed: {gap['error'].splitlines()[0]}")
+    elif gap:
+        report = json.loads((folder / "gap_report.json").read_text(encoding="utf-8"))
+        statuses = [r["status"] for r in report["requirements"]]
+        print(f"\nFit: {report['fit']['score']}/100. {report['fit']['justification']}")
+        print(f"  {statuses.count('have')} have, {statuses.count('partial')} partial, {statuses.count('missing')} missing; "
+              f"{len(report['recommendations'])} recommendation(s); {gap['web_search']['requests']} web search(es)")
+    u, lu, gu = meta.get("usage", {}), meta.get("layout", {}).get("usage", {}), (gap or {}).get("usage", {})
     print(f"\nTokens: tailoring {u.get('input_tokens', 0)} in / {u.get('output_tokens', 0)} out, "
           f"{u.get('cache_read_input_tokens', 0)} cache read, {u.get('cache_creation_input_tokens', 0)} cache write; "
-          f"layout {lu.get('input_tokens', 0)} in / {lu.get('output_tokens', 0)} out")
+          f"layout {lu.get('input_tokens', 0)} in / {lu.get('output_tokens', 0)} out"
+          + (f"; gap report {gu.get('input_tokens', 0)} in / {gu.get('output_tokens', 0)} out, "
+             f"{gu.get('cache_read_input_tokens', 0)} cache read" if gu else ""))
     print(f"Estimated cost: {cost.fmt(meta.get('cost_usd'))} ({meta.get('model')})")
     print(f"\nFolder: {folder}")
     print(f"PDF:    {_pdf(folder)}")
+    if (folder / "gap_report.md").is_file():
+        print(f"Gaps:   {folder / 'gap_report.md'}")
+        print(f"        {DEFAULT_OUTPUT_ROOT / 'skills_backlog.md'}")
 
 
 def print_table(rows: list[list[str]], headers: list[str]) -> None:
@@ -135,7 +149,15 @@ def _read_jd(args) -> str:
 
 
 def _run_options(args) -> dict:
-    return {"pages": args.pages, "layout_fix": not args.no_layout_fix, "model": args.model, "profile_path": args.profile}
+    return {"pages": args.pages, "layout_fix": not args.no_layout_fix, "gaps": not args.no_gaps, "model": args.model,
+            "profile_path": args.profile}
+
+
+def _fit(folder: Path) -> str:
+    path = folder / "gap_report.json"
+    if not path.is_file():
+        return "-"
+    return str(json.loads(path.read_text(encoding="utf-8"))["fit"]["score"])
 
 
 def cmd_new(args) -> int:
@@ -167,19 +189,21 @@ def cmd_batch(args) -> int:
             failures += 1
             message = explain(exc)
             print(f"  FAILED: {message}")
-            rows.append([path.name, "", "", "", "", "", "", "FAILED: " + message.splitlines()[0][:70]])
+            rows.append([path.name, "", "", "", "", "", "", "", "FAILED: " + message.splitlines()[0][:70]])
             continue
         meta = _meta(folder)
         lay = meta.get("layout", {})
         run_cost = meta.get("cost_usd")
         total += run_cost or 0
         rel = folder.relative_to(DEFAULT_OUTPUT_ROOT.parent) if folder.is_relative_to(DEFAULT_OUTPUT_ROOT.parent) else folder
-        rows.append([path.name, meta.get("company", ""), meta.get("role", ""), str(rel),
+        rows.append([path.name, meta.get("company", ""), meta.get("role", ""), str(rel), _fit(folder),
                      str(lay.get("final_pages", "")), str(lay.get("final_widows", "")), cost.fmt(run_cost), "ok"])
         print(f"  done: {rel} ({cost.fmt(run_cost)})")
 
     print(f"\nSummary: {len(files) - failures} succeeded, {failures} failed, estimated total {cost.fmt(total)}\n")
-    print_table(rows, ["JD", "Company", "Role", "Folder", "Pages", "Widows left", "Cost", "Status"])
+    print_table(rows, ["JD", "Company", "Role", "Folder", "Fit", "Pages", "Widows left", "Cost", "Status"])
+    if not args.no_gaps:
+        print(f"\nSkills backlog: {DEFAULT_OUTPUT_ROOT / 'skills_backlog.md'}")
     return 1 if failures else 0
 
 
@@ -213,6 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
     def run_flags(p):
         p.add_argument("--pages", type=int, choices=(1, 2), help="page limit for this run (default: limits.MAX_PAGES)")
         p.add_argument("--no-layout-fix", action="store_true", help="check the layout but don't ask Claude to fix it")
+        p.add_argument("--no-gaps", action="store_true", help="skip the skill-gap report (gap_report.md, skills backlog)")
         p.add_argument("--model", help="Claude model (default: CV_MODEL or claude-opus-5-5)")
         p.add_argument("--profile", type=Path, default=DEFAULT_PROFILE, help="master profile (default: profile.json)")
 

@@ -107,7 +107,7 @@ def rendered(monkeypatch):
 
 
 def run_example(tmp_path, jd="Senior Backend Engineer at Acme.\r\nNode.js required.\n", **kwargs):
-    return pipeline.run(jd, profile_path=EXAMPLE, output_root=tmp_path, today=DAY,
+    return pipeline.run(jd, profile_path=EXAMPLE, output_root=tmp_path, today=DAY, gaps=False,
                         client=FakeClient([json.loads(json.dumps(SELECTION))]), **kwargs)
 
 

@@ -69,10 +69,28 @@ def test_request_caches_everything_but_the_jd(profile):
     a = build_request(profile, "JD one", "claude-opus-5-5", "high")
     b = build_request(profile, "JD two", "claude-opus-5-5", "high")
     assert a["system"] == b["system"] and a["tools"] == b["tools"]
-    assert a["system"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert a["system"][1]["cache_control"] == {"type": "ephemeral"}  # breakpoint on the profile
+    assert "cache_control" not in a["system"][2]  # the task prompt comes after it
     assert "JD one" in a["messages"][0]["content"] and "JD one" not in json.dumps(a["system"])
     assert a["tool_choice"]["type"] == "auto"  # Opus 5.5 rejects forced tool_choice
     assert '"sources"' not in a["system"][1]["text"]
+
+
+def test_gap_call_shares_the_cached_prefix(profile, monkeypatch):
+    """Tools, betas, shared rules and profile must be byte-identical across tailor and gap calls,
+    or the gap call re-writes the whole profile to the cache."""
+    from cvgen.gaps import build_gap_request
+    for flag in ("1", "0"):
+        monkeypatch.setenv("GAP_WEB_SEARCH", flag)
+        t = build_request(profile, "JD", "claude-opus-5-5", "high")
+        g = build_gap_request(profile, "JD", "claude-opus-5-5", "high", web_search=flag == "1")
+        assert json.dumps(t["tools"]) == json.dumps(g["tools"]) and t["betas"] == g["betas"]
+        assert json.dumps(t["system"][:2]) == json.dumps(g["system"][:2])
+        assert t["system"][2] != g["system"][2]
+    assert [tool.get("defer_loading", False) for tool in t["tools"]] == [False, True]  # search off: not declared
+    changes = g["messages"][1]["content"]
+    assert g["messages"][1]["role"] == "system"
+    assert [(c["type"], c["tool"]["name"]) for c in changes] == [("tool_removal", "submit_cv"), ("tool_addition", "submit_gap_report")]
 
 
 def test_assemble_fills_facts_from_profile(profile):

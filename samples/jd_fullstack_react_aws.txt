@@ -1,0 +1,31 @@
+Senior Full-Stack Engineer (React / Node.js, AWS)
+Northwind Labs · Bucharest, Romania · Hybrid
+
+Sample job description, written to test the skill-gap report.
+
+About us
+Northwind Labs builds a B2B analytics platform used by logistics companies to track shipments and costs in real time.
+
+What you'll do
+- Build features end to end: React + TypeScript front end, Node.js/NestJS APIs, PostgreSQL.
+- Own our AWS infrastructure for your services: Lambda, ECS, S3, RDS and CloudWatch, defined with AWS CDK or Terraform.
+- Design REST and GraphQL APIs consumed by our web app and partners.
+- Write unit, integration and end-to-end tests (Jest, React Testing Library, Playwright).
+- Monitor production with CloudWatch and OpenTelemetry and fix what you find.
+- Mentor two mid-level engineers and take part in code reviews.
+
+Requirements
+- 5+ years of professional software engineering experience
+- 3+ years of React with TypeScript in production (hooks, state management with Redux or React Query)
+- Strong Node.js and TypeScript; NestJS or Express
+- Hands-on AWS experience in production (Lambda, ECS, S3, RDS, IAM)
+- Infrastructure as code with AWS CDK or Terraform
+- PostgreSQL and SQL performance tuning
+- CI/CD with GitHub Actions
+- Fluent English
+
+Nice to have
+- AWS Certified Developer or Solutions Architect certification
+- Next.js
+- Experience with event-driven systems (Kafka, SQS/SNS)
+- Logistics or supply-chain domain experience

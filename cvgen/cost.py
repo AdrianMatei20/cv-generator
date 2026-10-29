@@ -38,14 +38,19 @@ def estimate(usage: dict, model: str) -> float | None:
     ) / 1_000_000
 
 
+WEB_SEARCH_USD = 0.01  # $10 per 1,000 searches, on top of the tokens their results add
+
+
 def run_cost(meta: dict) -> float | None:
-    """Total for a pipeline run from cv.meta.json: tailoring plus layout calls."""
+    """Total for a pipeline run from cv.meta.json: tailoring, layout and gap-report calls."""
     model = meta.get("model", "")
     model = next((m for m in sorted(PRICES, key=len, reverse=True) if model.startswith(m)), model)
-    parts = [estimate(meta.get("usage", {}), model), estimate(meta.get("layout", {}).get("usage", {}), model)]
+    gap_usage = (meta.get("gap_report") or {}).get("usage", {})
+    parts = [estimate(meta.get("usage", {}), model), estimate(meta.get("layout", {}).get("usage", {}), model),
+             estimate(gap_usage, model)]
     if any(p is None for p in parts):
         return None
-    return round(sum(parts), 4)
+    return round(sum(parts) + gap_usage.get("web_search_requests", 0) * WEB_SEARCH_USD, 4)
 
 
 def fmt(cost: float | None) -> str:
