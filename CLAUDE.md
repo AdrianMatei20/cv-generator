@@ -14,7 +14,12 @@ Generates a tailored CV (docx + PDF) from a job description (JD), using a master
 
 1. `profile.json`: master profile with everything about the candidate (the only source of facts).
 2. The user gives the app a JD.
-3. `cvgen/tailor.py`: Claude picks and rephrases profile content into a CV JSON matching the schema below.
+3. `cvgen/tailor.py`: Claude picks and rephrases profile content into a CV JSON matching the schema below. `tailor(profile, jd) -> TailorResult` (`cv`, `company`, `role`, `sources`, `gaps`, `problems`, `usage`; `meta()` is what goes in `cv.meta.json`).
+   - Model from `CV_MODEL` (default `claude-opus-5-5`), effort from `CV_EFFORT` (default `high`; Opus 5.5's own default is `medium`). Adaptive thinking, streaming, and the server-side refusal fallback (`fallbacks: "default"`) are on.
+   - Structured output via one strict tool, `submit_cv` (schema from `TailoredCV`). Opus 5.5 rejects a forced `tool_choice`, so it's `auto` + the prompt, and `tailor()` retries once if no tool call comes back.
+   - Claude only picks profile items by id and writes headline, summary, skill lines and bullet text, each with `source_ids`. Titles, companies, dates, locations, education, certificates and contact details are copied from the profile by id in `assemble()`, which also reports unknown or misplaced ids, mixed compact/regular project bullets, `never_claim` hits and schema/limit violations in `problems`.
+   - Caching: tools + system prompt + profile (without `sources`) form a byte-stable prefix with `cache_control` on the last system block; the JD is the only uncached input. Never put anything per-run (dates, ids, the JD) before that breakpoint. Usage incl. `cache_read` is logged at INFO.
+   - `python samples/try_tailor.py` runs it on `samples/jd_example.txt` (real API call).
 4. `cvgen/validate.py`: Python validates the JSON (schema + length rules); errors go back to Claude to fix.
 5. `cvgen/render.py`: `render()` writes the docx, then the PDF.
 6. `cvgen/layout.py`: finds bullets in the PDF whose last line has 4 words or fewer, sends only those to Claude to rephrase, and re-renders. Max 2 rounds.

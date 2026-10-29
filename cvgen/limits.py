@@ -10,6 +10,9 @@ characters, median 113. Summary and skills lines (no indent) hold ~112-120.
 # estimates of line count err towards "more lines".
 CHARS_PER_LINE = 110
 
+# The whole CV must fit on this many pages.
+MAX_PAGES = 2
+
 # Bullets: at most two full lines. Avoid targeting ~115-135 characters: that
 # wraps onto a second line holding only a word or two (the orphan step 6 fixes).
 MAX_BULLET_CHARS = 2 * CHARS_PER_LINE  # 220
