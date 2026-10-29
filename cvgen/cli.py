@@ -233,7 +233,8 @@ def cmd_serve(args) -> int:
 
 def cmd_service(args) -> int:
     from cvgen import service
-    lines = {"install": service.install, "uninstall": service.uninstall, "status": service.status}[args.action]()
+    lines = {"install": service.install, "uninstall": service.uninstall, "start": service.start,
+             "stop": service.stop_server, "status": service.status}[args.action]()
     for line in lines:
         print(line)
     return 0
@@ -383,8 +384,8 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
     bench.set_defaults(func=cmd_bench)
 
-    svc = sub.add_parser("service", help="start the server hidden at login (install/uninstall/status)")
-    svc.add_argument("action", choices=("install", "uninstall", "status"))
+    svc = sub.add_parser("service", help="run the server in the background (install/uninstall at login, start/stop now, status)")
+    svc.add_argument("action", choices=("install", "uninstall", "start", "stop", "status"))
     svc.set_defaults(func=cmd_service)
 
     prof = sub.add_parser("profile", help="profile.json tools")

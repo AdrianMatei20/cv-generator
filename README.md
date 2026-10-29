@@ -28,6 +28,7 @@ It registers a small local server to start hidden whenever you log in (Windows: 
 - The server listens on 127.0.0.1 only (port `CVGEN_PORT`, default 8765), reads `ANTHROPIC_API_KEY` from `.env`, and logs to `logs/server.log`. The API key never reaches the page.
 - Only the desktop page and the page at http://127.0.0.1:8765/ can use it: requests must come from those origins and carry a local access token (in `.cvgen_token`, written into both pages automatically).
 - If the page says the server isn't running, start it in a terminal with `cvgen serve`.
+- `cvgen service stop` stops the server now and `cvgen service start` starts it again in the background; neither changes autostart, so a stopped server comes back at your next login.
 - `cvgen service status` shows whether it's registered and running; `cvgen service uninstall` removes the autostart, stops the server and deletes the desktop copy.
 
 ## Manual flow (unchanged, no AI)

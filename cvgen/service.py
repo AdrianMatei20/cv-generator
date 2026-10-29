@@ -144,19 +144,28 @@ def is_running(port: int, timeout: float = 1.0) -> bool:
         return False
 
 
-def start_now(port: int) -> bool:
-    """Start the server in the background now (Windows; launchd/systemd start it themselves)."""
+def start_now(port: int, spawn: bool | None = None) -> bool:
+    """Start the server in the background now and wait until it answers. By default it's only spawned
+    on Windows (launchd/systemd start it themselves on install); `spawn=True` spawns it on any OS."""
     if is_running(port):
         return True
-    if sys.platform == "win32":
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-        subprocess.Popen(server_command(), cwd=REPO_ROOT, creationflags=flags, close_fds=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if sys.platform == "win32" if spawn is None else spawn:
+        _spawn()
     for _ in range(40):
         if is_running(port):
             return True
         time.sleep(0.5)
     return False
+
+
+def _spawn() -> None:
+    """The server as a detached background process with no console window."""
+    if sys.platform == "win32":
+        options = {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+    else:
+        options = {"start_new_session": True}
+    subprocess.Popen(server_command(), cwd=REPO_ROOT, close_fds=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **options)
 
 
 def stop(port: int) -> bool:
@@ -232,6 +241,30 @@ def uninstall() -> list[str]:
     lines.append("Server stopped." if stop(port) else "Server was not running.")
     page = remove_page()
     lines.append(f"Removed {page}" if page else "No desktop page to remove.")
+    return lines
+
+
+def start() -> list[str]:
+    """Start the server now, without touching autostart."""
+    port = configured_port()
+    if is_running(port):
+        return [f"Server already running at http://127.0.0.1:{port}/"]
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    load_token()
+    return [f"Server running at http://127.0.0.1:{port}/" if start_now(port, spawn=True)
+            else f"Server didn't answer yet; see {LOG_FILE}"]
+
+
+def stop_server() -> list[str]:
+    """Stop the server now, without touching autostart."""
+    port = configured_port()
+    if not is_running(port):
+        return ["Server was not running."]
+    if not stop(port):
+        return [f"Server didn't stop; see {LOG_FILE}"]
+    lines = ["Server stopped."]
+    if autostart_path().exists():
+        lines.append("It starts again at your next login; `cvgen service uninstall` turns that off.")
     return lines
 
 

@@ -73,3 +73,56 @@ def test_desktop_copy_has_token_and_port_and_is_removed(monkeypatch, tmp_path):
     other = tmp_path / "CV Generator.html"
     other.write_text("<html>someone else's file</html>", encoding="utf-8")
     assert service.remove_page(desktop=tmp_path) is None and other.exists()  # only removes our own page
+
+
+class FakeServer:
+    """Stands in for the running server: is_running/stop/_spawn flip one flag."""
+
+    def __init__(self, monkeypatch, tmp_path, running, autostart=False):
+        self.running, self.spawned = running, 0
+        monkeypatch.setattr(service, "is_running", lambda port, timeout=1.0: self.running)
+        monkeypatch.setattr(service, "stop", self._stop)
+        monkeypatch.setattr(service, "_spawn", self._spawn)
+        monkeypatch.setattr(service, "load_token", lambda: "tok")
+        monkeypatch.setattr(service, "LOG_FILE", tmp_path / "logs" / "server.log")
+        shortcut = tmp_path / "autostart.lnk"
+        if autostart:
+            shortcut.write_text("x")
+        monkeypatch.setattr(service, "autostart_path", lambda: shortcut)
+
+    def _stop(self, port):
+        was, self.running = self.running, False
+        return was
+
+    def _spawn(self):
+        self.spawned += 1
+        self.running = True
+
+
+def test_start_spawns_only_when_not_running(monkeypatch, tmp_path):
+    fake = FakeServer(monkeypatch, tmp_path, running=False)
+    assert service.start()[0].startswith("Server running at http://127.0.0.1:")
+    assert fake.spawned == 1
+    assert service.start()[0].startswith("Server already running")
+    assert fake.spawned == 1
+
+
+def test_stop_reports_autostart(monkeypatch, tmp_path):
+    fake = FakeServer(monkeypatch, tmp_path, running=True, autostart=True)
+    lines = service.stop_server()
+    assert lines[0] == "Server stopped." and "next login" in lines[1] and not fake.running
+    assert service.stop_server() == ["Server was not running."]
+
+
+def test_stop_without_autostart_says_nothing_about_login(monkeypatch, tmp_path):
+    FakeServer(monkeypatch, tmp_path, running=True)
+    assert service.stop_server() == ["Server stopped."]
+
+
+def test_cli_service_start_and_stop(monkeypatch, tmp_path, capsys):
+    from cvgen import cli
+    FakeServer(monkeypatch, tmp_path, running=False)
+    assert cli.main(["service", "start"]) == 0
+    assert cli.main(["service", "stop"]) == 0
+    out = capsys.readouterr().out
+    assert "Server running at" in out and "Server stopped." in out
