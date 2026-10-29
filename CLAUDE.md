@@ -24,7 +24,7 @@ Generates a tailored CV (docx + PDF) from a job description (JD), using a master
    - Repair loop in `tailor()`: on errors, the assistant turn (unchanged, thinking included) and an `is_error` `tool_result` listing the errors go back in the same conversation, and Claude calls `submit_cv` again. At most `MAX_REPAIRS = 2` repairs; then `TailorValidationError`, with the last attempt saved as `cv.draft.json` + `cv.draft.meta.json` in `draft_dir` if given. `result.repairs` / `meta["repairs"]` record each rejected attempt's errors.
 5. `cvgen/render.py`: `render()` writes the docx, then the PDF.
 6. `cvgen/layout.py`: finds bullets in the PDF whose last line has 4 words or fewer, sends only those to Claude to rephrase, and re-renders. Max 2 rounds.
-7. Output is written to `output/<Company>_<Role>_<YYYY-MM-DD>/`:
+7. `cvgen/pipeline.py` `run(jd, company=None, role=None) -> Path` ties it together (CLI: `python -m cvgen.cli jd.txt [--company X --role Y]`, or `-` for stdin). Explicit company/role override what Claude extracted (`meta["extracted"]` keeps the originals). Names are sanitised by `cvgen/output.py`: accents stripped, PascalCase, only letters/digits, max 40 chars each, `Unknown` if empty; the date is today's local date; an existing folder gets `_2`, `_3`, ... instead of being overwritten. File base name is `CV_<CANDIDATE_FILENAME>` (env, default `AdrianMatei`). The PDF comes from the same LibreOffice `render()` as the legacy command, and `run()` fails if it wasn't created. If repairs fail, the folder holds `job_description.txt`, `cv.draft.json` and `cv.draft.meta.json` instead. Output is written to `output/<Company>_<Role>_<YYYY-MM-DD>/`:
    - `CV_AdrianMatei.pdf`
    - `CV_AdrianMatei.docx`
    - `cv.json` (the final CV JSON)
@@ -43,7 +43,9 @@ cvgen/convert.py     one-off: existing CV JSONs -> starter profile.json
 cvgen/tailor.py      Claude: profile + JD -> CV JSON
 cvgen/validate.py    schema + length rules
 cvgen/layout.py      short-last-line detection in the PDF
-cvgen/cli.py         AI pipeline entry point
+cvgen/output.py      output folder naming (sanitising, date, _N suffix), CANDIDATE_FILENAME
+cvgen/pipeline.py    run(jd, company, role) -> output folder
+cvgen/cli.py         AI pipeline entry point: python -m cvgen.cli jd.txt
 templates/           docx templates (docxtpl / Jinja tags)
 data/                hand-written CV JSONs for the legacy command
 tests/test_legacy.py golden test for `python generate.py`
