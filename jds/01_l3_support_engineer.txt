@@ -1,0 +1,27 @@
+Senior Technical Support Engineer – L3
+Bucharest, Romania · Hybrid · Full-time
+
+We're recruiting for a global technology company building an AI-powered platform used by major international brands to automate and manage complex payment disputes and chargeback operations.
+
+As a Senior Technical Support Engineer – L3, you'll be the final technical escalation point for complex production issues and will work closely with Engineering, Product and customer-facing teams.
+
+What you'll do:
+- Own complex L3 technical escalations from investigation to verified resolution
+- Perform deep root cause analysis across microservices, data, configuration and third-party integrations
+- Investigate production issues using logs, traces, metrics, database queries, API payloads and application code
+- Write, test and ship code, scripts, configuration changes and data fixes yourself
+- Work with distributed, microservice-based systems
+- Assess production impact and prioritize incidents based on severity and business impact
+- Improve monitoring, alerting, runbooks and internal diagnostic tools
+- Build automation that reduces repetitive investigation work
+- Use AI coding and agent tools as part of your daily engineering workflow
+
+What we're looking for:
+- 5+ years of experience in a hands-on technical role such as L3 Support, Production Engineering, Backend Engineering or SRE
+- 3+ years of hands-on development experience with Node.js
+- Strong experience debugging complex production issues in distributed / microservice architectures
+- Experience with Kubernetes, cloud infrastructure, logging, tracing and monitoring
+- Hands-on experience with SQL and NoSQL databases, such as PostgreSQL, MongoDB and Redis
+- Ability to independently write, test and ship production code
+- Experience using AI coding or agent-based development tools
+- Strong English communication skills
