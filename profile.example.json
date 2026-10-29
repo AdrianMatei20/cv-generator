@@ -1,0 +1,108 @@
+{
+  "contact": {
+    "name": "Jane Doe",
+    "phone": "+40 700 000 000",
+    "email": "jane.doe@example.com",
+    "location": "Cluj-Napoca, Romania",
+    "linkedin": { "text": "linkedin.com/in/janedoe", "url": "https://www.linkedin.com/in/janedoe" },
+    "github": { "text": "github.com/janedoe", "url": "https://github.com/janedoe" }
+  },
+  "headlines": [
+    { "id": "headline-backend", "text": "Backend Engineer – Node.js / TypeScript | Cluj-Napoca, Romania", "tags": ["backend"] },
+    { "id": "headline-sre", "text": "Production & Platform Engineer – Kubernetes / Observability", "tags": ["sre", "devops"] }
+  ],
+  "summaries": [
+    {
+      "id": "summary-backend",
+      "text": "Backend engineer with 6 years building Node.js and TypeScript services for payments and logistics platforms. Owns features from API design to production, including on-call and incident follow-up.",
+      "tags": ["backend", "node"]
+    },
+    {
+      "id": "summary-sre",
+      "text": "Engineer with 6 years across backend and platform work, focused on reliable production systems: Kubernetes, observability and incident response for services handling 2M requests a day.",
+      "tags": ["sre", "devops"]
+    }
+  ],
+  "experience": [
+    {
+      "id": "exp-acme",
+      "company": "Acme Payments",
+      "title": "Senior Backend Engineer",
+      "location": "Hybrid",
+      "start": "2023-03",
+      "end": null,
+      "tags": ["payments", "backend"],
+      "bullets": [
+        { "id": "exp-acme-01", "text": "Built a Node.js dispute-ingestion service processing 40k chargeback events a day from 3 card networks", "tags": ["backend", "node", "payments"] },
+        { "id": "exp-acme-02", "text": "Cut p95 latency of the merchant API from 900ms to 220ms by adding Redis caching and fixing N+1 PostgreSQL queries", "tags": ["backend", "performance", "postgres"] },
+        { "id": "exp-acme-03", "text": "Led root cause analysis for 12 severity-1 incidents and wrote the runbooks the on-call rotation now uses", "tags": ["incident", "leadership"] },
+        { "id": "exp-acme-04", "text": "Added OpenTelemetry tracing across 9 services, so a failed payment can be followed from gateway to database", "tags": ["observability"] },
+        { "id": "exp-acme-05", "text": "Mentored two junior engineers through code review and pairing", "tags": ["leadership"] }
+      ]
+    },
+    {
+      "id": "exp-globex",
+      "company": "Globex Logistics",
+      "title": "Software Engineer",
+      "location": "Remote",
+      "start": "2020-06",
+      "end": "2023-02",
+      "tags": ["backend"],
+      "bullets": [
+        { "id": "exp-globex-01", "text": "Designed a PostgreSQL schema and REST API for shipment tracking used by 300 warehouse clients", "tags": ["backend", "postgres"] },
+        { "id": "exp-globex-02", "text": "Migrated 14 cron jobs to Kubernetes CronJobs with alerting, removing a single point of failure", "tags": ["devops", "kubernetes"] },
+        { "id": "exp-globex-03", "text": "Wrote Python scripts to reconcile carrier invoices, saving the finance team about 10 hours a week", "tags": ["python", "automation"] }
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "id": "proj-statuspage",
+      "name": "StatusPage",
+      "description": "self-hosted uptime monitor (Node.js, PostgreSQL, Kubernetes)",
+      "link": { "text": "github.com/janedoe/statuspage", "url": "https://github.com/janedoe/statuspage" },
+      "tags": ["observability", "node"],
+      "bullets": [
+        { "id": "proj-statuspage-01", "text": "Polls 50 endpoints every 30s and pages via Slack and email when 3 checks in a row fail", "tags": ["observability"] },
+        { "id": "proj-statuspage-02", "text": "Deployed with Helm on k3s, with Prometheus metrics and Grafana dashboards", "tags": ["kubernetes", "devops"] }
+      ]
+    }
+  ],
+  "education": [
+    { "id": "edu-bsc", "institution": "Babes-Bolyai University", "degree": "BSc in Computer Science", "graduated": "2020-06" }
+  ],
+  "certifications": [
+    { "id": "cert-cka", "name": "Certified Kubernetes Administrator (CKA)", "date": "2024-05" },
+    { "id": "cert-aws-saa", "name": "AWS Certified Solutions Architect – Associate", "status": "In preparation" }
+  ],
+  "skills": [
+    {
+      "category": "Core",
+      "skills": [
+        { "id": "skill-nodejs", "name": "Node.js", "tags": ["backend"] },
+        { "id": "skill-typescript", "name": "TypeScript", "tags": ["backend"] },
+        { "id": "skill-python", "name": "Python", "tags": ["python"] }
+      ]
+    },
+    {
+      "category": "Databases",
+      "skills": [
+        { "id": "skill-postgresql", "name": "PostgreSQL" },
+        { "id": "skill-mongodb", "name": "MongoDB" },
+        { "id": "skill-redis", "name": "Redis" }
+      ]
+    },
+    {
+      "category": "Infrastructure & Observability",
+      "skills": [
+        { "id": "skill-kubernetes", "name": "Kubernetes", "tags": ["devops"] },
+        { "id": "skill-opentelemetry", "name": "OpenTelemetry", "tags": ["observability"] },
+        { "id": "skill-prometheus", "name": "Prometheus", "tags": ["observability"] }
+      ]
+    }
+  ],
+  "languages": [
+    { "id": "lang-romanian", "language": "Romanian", "level": "Native" },
+    { "id": "lang-english", "language": "English", "level": "C1" }
+  ]
+}
