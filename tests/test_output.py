@@ -163,3 +163,13 @@ def test_run_saves_draft_when_repairs_fail(tmp_path, rendered):
     assert str(folder) in str(info.value)
     assert sorted(p.name for p in folder.iterdir()) == ["cv.draft.json", "cv.draft.meta.json", "job_description.txt"]
     assert rendered == []
+
+
+def test_run_without_gaps_leaves_the_backlog_alone(tmp_path, rendered):
+    backlog = tmp_path / "skills_backlog.md"
+    backlog.write_text("# earlier backlog\n", encoding="utf-8")
+    folder = run_example(tmp_path)
+    assert not (folder / "gap_report.json").exists() and not (folder / "gap_report.md").exists()
+    assert backlog.read_text(encoding="utf-8") == "# earlier backlog\n"
+    meta = json.loads((folder / "cv.meta.json").read_text(encoding="utf-8"))
+    assert meta["settings"]["gaps"] is False and "gap_report" not in meta

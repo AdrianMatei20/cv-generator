@@ -235,3 +235,14 @@ def test_page_config_injection(tmp_path):
     repo_copy = server.UI_FILE.read_text(encoding="utf-8")
     assert '{"port": 8765, "token": ""}' in repo_copy  # the committed file carries no token
     assert "https://" not in repo_copy.split("<script>")[0] or "cdn" not in repo_copy.lower()  # no CDN
+
+
+def test_gap_report_checkbox_reaches_the_pipeline(make_client):
+    runner = Runner(None)
+    c = make_client(runner)
+    runner.root = c.output
+    wait_for(c, c.post("/api/jobs", json={"jd": "Node.js engineer", "gaps": False}, headers=OK).json()["id"])
+    wait_for(c, c.post("/api/jobs", json={"jd": "Node.js engineer"}, headers=OK).json()["id"])
+    assert [call[4] for call in runner.calls] == [False, True]  # unticked box -> no gap report; default on
+    page = c.get("/", headers={"Origin": "null"}).text
+    assert '<input type="checkbox" id="gaps" checked> Generate gap report' in page
