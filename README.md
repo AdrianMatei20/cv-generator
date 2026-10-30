@@ -13,7 +13,9 @@ Generates a CV as `.docx` and `.pdf` from a Word template, in two ways:
    - Manual flow only: `pip install docxtpl`
    - Everything, plus the `cvgen` command: `pip install -e .` (or `pip install -r requirements.txt` and use `python -m cvgen`)
 4. **API key** (tailored flow only): copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`. Optional settings there: `CANDIDATE_FILENAME` (default `AdrianMatei`, giving `CV_AdrianMatei.pdf`), and the cost settings: which model and effort each step uses (`TAILOR_MODEL`/`TAILOR_EFFORT`, `GAP_MODEL`/`GAP_EFFORT`/`GAP_MAX_SEARCHES`, `LAYOUT_MODEL`/`LAYOUT_EFFORT`) and `CACHE_TTL`; `.env.example` lists them with their defaults.
-5. **Profile** (tailored flow only): `profile.json` holds everything about you; `profile.example.json` shows the format. Check it with `cvgen profile check`.
+5. **Profile** (tailored flow only): `profile.json` holds everything about you; copy `profile.example.json` to `profile.json` and fill it in. Check it with `cvgen profile check`.
+
+Your personal files stay local: `profile.json`, `profile_additions/` and everything in `data/` except `data/example.json` are git-ignored.
 
 ## Browser page (no commands)
 
@@ -33,7 +35,7 @@ It registers a small local server to start hidden whenever you log in (Windows: 
 
 ## Manual flow (unchanged, no AI)
 
-Write or edit a CV JSON in `data/`, then:
+Write or edit a CV JSON in `data/` (`data/example.json` shows the format), then:
 
 ```
 python generate.py

@@ -211,3 +211,8 @@ output/
 # Local CV server: access token and logs
 .cvgen_token
 logs/
+# Personal data: kept locally, never committed
+profile.json
+profile_additions/
+data/*
+!data/example.json
